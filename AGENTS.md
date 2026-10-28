@@ -55,6 +55,10 @@ Analyze actual Python behavior and record a short compatibility matrix in `docs/
 
 ## Documentation and Makefile contract
 
+[`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) is the normative documentation
+contract for this repository; this section is an entry point and does not
+supersede it.
+
 Adapt the applicable conventions in the reference `docs/DOCUMENTATION.md` as a **normative contract** for this repository, and link it from `README.md` and this `AGENTS.md` rather than duplicating its rules. Preserve these requirements:
 
 - English for source code comments and docs. Every Go package has a purpose-driven package comment (`Package <name>`; `Command`/`Package main` for main). Every exported identifier has a useful GoDoc comment starting with its exact name, including exported struct fields.
