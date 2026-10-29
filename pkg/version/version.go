@@ -5,7 +5,7 @@ const (
 	// AppName is the CLI executable name.
 	AppName = "go-db-sync-mssql-pgsql"
 	// Version is the single source of truth for the release version.
-	Version = "0.2.0"
+	Version = "0.3.0"
 	// Repository is the Go module path used by build-time linker flags.
 	Repository = "github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql"
 )

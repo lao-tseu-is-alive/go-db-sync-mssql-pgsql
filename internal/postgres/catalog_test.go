@@ -62,6 +62,23 @@ func TestValidateTarget(t *testing.T) {
 	}
 }
 
+func TestValidateTargetPreservesNumericPrecisionAndScale(t *testing.T) {
+	t.Parallel()
+	table := testTable()
+	table.Columns[1].PostgreSQLType = "numeric(18,6)"
+	target := targetTable{exists: true, columns: []targetColumn{
+		{name: "id", typeName: "integer", notNull: true},
+		{name: "name", typeName: "numeric(18, 6)", notNull: false},
+	}, primaryKey: []string{"id"}}
+	if err := validateTarget(table, target); err != nil {
+		t.Fatal(err)
+	}
+	target.columns[1].typeName = "numeric(18,5)"
+	if err := validateTarget(table, target); err == nil {
+		t.Fatal("validateTarget accepted a different numeric scale")
+	}
+}
+
 func TestTargetCatalogMarkersAcceptBinaryQChar(t *testing.T) {
 	t.Parallel()
 	var column targetColumn

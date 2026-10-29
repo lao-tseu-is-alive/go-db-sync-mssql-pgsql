@@ -12,6 +12,7 @@ func BenchmarkConvertValue(b *testing.B) {
 	}{
 		{name: "direct-integer", column: Column{Conversion: ConversionDirect}, value: int64(42)},
 		{name: "money", column: Column{Conversion: ConversionMoney}, value: []byte("123456789012345.6789")},
+		{name: "decimal", column: Column{Conversion: ConversionDecimal}, value: []byte("12345678901234567890.123456789012345678")},
 		{name: "uuid", column: Column{Conversion: ConversionUUID}, value: "6f9619ff-8b86-d011-b42d-00c04fc964ff"},
 		{name: "rowversion", column: Column{Conversion: ConversionRowVersion}, value: []byte{0, 0, 0, 0, 0, 0, 7, 0xd3}},
 	}

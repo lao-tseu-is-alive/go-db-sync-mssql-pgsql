@@ -100,8 +100,8 @@ func New(source Source, target Target) *Service {
 	return &Service{source: source, target: target}
 }
 
-// Run discovers and validates one table, then publishes only when Apply is true.
-func (service *Service) Run(ctx context.Context, request Request) (Report, error) {
+// Prepare discovers, validates and counts one table without opening its row stream.
+func (service *Service) Prepare(ctx context.Context, request Request) (Report, error) {
 	started := time.Now()
 	emitProgress(request.Progress, Progress{Phase: "discovering"})
 	phaseStarted := time.Now()
@@ -125,33 +125,72 @@ func (service *Service) Run(ctx context.Context, request Request) (Report, error
 	}
 	performance.SourceCountDuration = time.Since(phaseStarted)
 	report := Report{Table: table, SourceRows: count, TargetStatus: status, Performance: performance}
+	report.Duration = time.Since(started)
+	return report, nil
+}
+
+// ApplyPrepared streams and publishes one table that was already prepared.
+func (service *Service) ApplyPrepared(ctx context.Context, request Request, prepared Report) (Report, error) {
+	started := time.Now()
+	report := prepared
+	report.Applied = false
+	report.Publication = postgres.Result{}
 	if !request.Apply {
-		report.Duration = time.Since(started)
-		return report, nil
+		return report, fmt.Errorf("apply prepared table: request does not authorize --apply")
+	}
+	if err := validatePreparedRequest(request, prepared.Table); err != nil {
+		return report, err
 	}
 	transferPhase := "staging"
 	if request.SyncMode == syncmode.Replace {
 		transferPhase = "copying"
 	}
-	emitProgress(request.Progress, Progress{Phase: transferPhase, TotalRows: count})
-	phaseStarted = time.Now()
-	rows, err := service.source.Rows(ctx, table)
+	emitProgress(request.Progress, Progress{Phase: transferPhase, TotalRows: report.SourceRows})
+	phaseStarted := time.Now()
+	rows, err := service.source.Rows(ctx, report.Table)
 	if err != nil {
-		return Report{}, err
+		report.Duration = time.Since(started)
+		return report, err
 	}
 	report.Performance.SourceQueryDuration = time.Since(phaseStarted)
 	if request.Progress != nil && request.ProgressInterval > 0 {
-		rows = newProgressSource(rows, count, transferPhase, request.ProgressInterval, request.Progress)
+		rows = newProgressSource(rows, report.SourceRows, transferPhase, request.ProgressInterval, request.Progress)
 	}
-	result, err := service.target.Publish(ctx, table, rows, count, request.SyncMode)
+	result, err := service.target.Publish(ctx, report.Table, rows, report.SourceRows, request.SyncMode)
 	if err != nil {
-		return Report{}, err
+		report.Duration = time.Since(started)
+		return report, err
 	}
 	report.Publication = result
 	report.Performance.Publication = result.Performance
 	report.Applied = true
 	report.Duration = time.Since(started)
 	return report, nil
+}
+
+// Run prepares one table, then publishes only when Apply is true.
+func (service *Service) Run(ctx context.Context, request Request) (Report, error) {
+	started := time.Now()
+	report, err := service.Prepare(ctx, request)
+	if err != nil {
+		return Report{}, err
+	}
+	if !request.Apply {
+		report.Duration = time.Since(started)
+		return report, nil
+	}
+	report, err = service.ApplyPrepared(ctx, request, report)
+	report.Duration = time.Since(started)
+	return report, err
+}
+
+func validatePreparedRequest(request Request, table schema.Table) error {
+	if request.SourceSchema != table.SourceSchema || request.SourceTable != table.SourceName ||
+		request.TargetSchema != table.TargetSchema || request.TargetTable != table.TargetName {
+		return fmt.Errorf("apply prepared table: request does not match prepared mapping %s.%s to %s.%s",
+			table.SourceSchema, table.SourceName, table.TargetSchema, table.TargetName)
+	}
+	return nil
 }
 
 func emitProgress(callback func(Progress), progress Progress) {

@@ -1,4 +1,4 @@
-// Package postgres validates and atomically publishes one PostgreSQL table refresh.
+// Package postgres validates and atomically publishes PostgreSQL table refreshes.
 package postgres
 
 import (
@@ -81,7 +81,15 @@ type Client struct {
 
 // Open connects to PostgreSQL using the supplied DSN and verifies connectivity.
 func Open(ctx context.Context, dsn string) (*Client, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse PostgreSQL connection config: %w", err)
+	}
+	// A client is owned by one bounded worker. Keep one physical connection per
+	// client so --workers is also the target-connection upper bound.
+	config.MaxConns = 1
+	config.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL pool: %w", err)
 	}

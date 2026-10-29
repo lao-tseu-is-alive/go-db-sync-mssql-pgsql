@@ -1,4 +1,4 @@
-// Package config parses the guarded single-table CLI contract and secret-bearing DSNs.
+// Package config parses the guarded table-selection CLI contract and secret-bearing DSNs.
 package config
 
 import (
@@ -18,14 +18,20 @@ import (
 const usageText = `Usage:
   go-db-sync-mssql-pgsql --source-table NAME --dry-run [options]
   go-db-sync-mssql-pgsql --source-table NAME --apply [options]
+  go-db-sync-mssql-pgsql --all-tables --dry-run [options]
+  go-db-sync-mssql-pgsql --all-tables --apply [options]
+  go-db-sync-mssql-pgsql --list-tables [--source-schema NAME]
   go-db-sync-mssql-pgsql --version
 
-Exactly one table is processed. --dry-run discovers and validates without
-PostgreSQL writes. --apply explicitly authorizes a transactional full refresh.
+Choose one source table or all base tables in the source schema. --dry-run
+prints and validates the plan without PostgreSQL writes. --apply explicitly
+authorizes independent transactional refreshes. A multi-table run is not
+database-wide atomic.
 
-Connection settings are read from exported MSSQL_DSN and PGSQL_DSN values,
-then from an optional ./.env fallback. Exported values take precedence. DSNs
-are never printed. The SQL Server credential should be read-only.
+Synchronization settings are read from exported MSSQL_DSN and PGSQL_DSN
+values, then from an optional ./.env fallback. --list-tables requires only
+MSSQL_DSN and never connects to PostgreSQL. Exported values take precedence.
+DSNs are never printed. The SQL Server credential should be read-only.
 
 Options:
 `
@@ -34,8 +40,18 @@ Options:
 type Options struct {
 	// SourceSchema is the selected SQL Server schema.
 	SourceSchema string
-	// SourceTable is the required SQL Server table.
+	// SourceTable is the selected SQL Server table in single-table mode.
 	SourceTable string
+	// AllTables selects all discovered base tables in SourceSchema.
+	AllTables bool
+	// ListTables requests a read-only source-table inventory without PostgreSQL.
+	ListTables bool
+	// TablesConfig is an optional YAML file containing exact source-name exclusions.
+	TablesConfig string
+	// Workers bounds concurrent multi-table jobs and database connection pairs.
+	Workers int
+	// ShowExcluded prints every excluded table in an all-table plan.
+	ShowExcluded bool
 	// TargetSchema is the selected PostgreSQL schema.
 	TargetSchema string
 	// TargetTable is the explicit or legacy-transformed PostgreSQL table.
@@ -60,8 +76,12 @@ type Options struct {
 	PGSQLDSN string
 }
 
-// ErrMissingDSN reports that one or both required database DSNs are unavailable.
-var ErrMissingDSN = errors.New("MSSQL_DSN and PGSQL_DSN are required")
+var (
+	// ErrMissingDSN reports that one or both synchronization DSNs are unavailable.
+	ErrMissingDSN = errors.New("MSSQL_DSN and PGSQL_DSN are required")
+	// ErrMissingMSSQLDSN reports that source-only table listing lacks its DSN.
+	ErrMissingMSSQLDSN = errors.New("MSSQL_DSN is required")
+)
 
 // Parse validates command-line arguments and reads DSNs through getenv.
 func Parse(arguments []string, getenv func(string) string, output io.Writer) (Options, error) {
@@ -74,7 +94,12 @@ func Parse(arguments []string, getenv func(string) string, output io.Writer) (Op
 		flags.PrintDefaults()
 	}
 	flags.StringVar(&options.SourceSchema, "source-schema", "dbo", "SQL Server source schema")
-	flags.StringVar(&options.SourceTable, "source-table", "", "SQL Server source table (required)")
+	flags.StringVar(&options.SourceTable, "source-table", "", "one SQL Server source table")
+	flags.BoolVar(&options.AllTables, "all-tables", false, "select all base tables in the source schema")
+	flags.BoolVar(&options.ListTables, "list-tables", false, "list exact SQL Server base-table names without connecting to PostgreSQL")
+	flags.StringVar(&options.TablesConfig, "tables-config", "", "YAML file with exact MSSQL table-name exclusions (requires --all-tables)")
+	flags.IntVar(&options.Workers, "workers", 2, "maximum concurrent table jobs in --all-tables mode (minimum 1)")
+	flags.BoolVar(&options.ShowExcluded, "show-excluded", false, "show excluded table details in an --all-tables plan")
 	flags.StringVar(&options.TargetSchema, "target-schema", "public", "PostgreSQL target schema")
 	flags.StringVar(&options.TargetTable, "target-table", "", "PostgreSQL target table (default: legacy name transform)")
 	flags.BoolVar(&options.Apply, "apply", false, "authorize the transactional PostgreSQL refresh")
@@ -93,8 +118,23 @@ func Parse(arguments []string, getenv func(string) string, output io.Writer) (Op
 	if options.Version {
 		return options, nil
 	}
-	if options.SourceTable == "" {
-		return Options{}, errors.New("--source-table is required")
+	if options.ListTables {
+		return parseListTables(options, getenv)
+	}
+	if (options.SourceTable == "" && !options.AllTables) || (options.SourceTable != "" && options.AllTables) {
+		return Options{}, errors.New("choose exactly one of --source-table or --all-tables")
+	}
+	if options.TablesConfig != "" && !options.AllTables {
+		return Options{}, errors.New("--tables-config requires --all-tables")
+	}
+	if options.ShowExcluded && !options.AllTables {
+		return Options{}, errors.New("--show-excluded requires --all-tables")
+	}
+	if options.AllTables && options.TargetTable != "" {
+		return Options{}, errors.New("--target-table cannot be used with --all-tables")
+	}
+	if options.Workers < 1 {
+		return Options{}, errors.New("--workers must be at least 1")
 	}
 	if options.Apply == options.DryRun {
 		return Options{}, errors.New("choose exactly one of --dry-run or --apply")
@@ -107,25 +147,49 @@ func Parse(arguments []string, getenv func(string) string, output io.Writer) (Op
 		return Options{}, fmt.Errorf("--sync-mode: %w", err)
 	}
 	options.SyncMode = mode
-	if options.TargetTable == "" {
+	if !options.AllTables && options.TargetTable == "" {
 		options.TargetTable = naming.TableName(options.SourceTable)
 	}
 	if err := ident.ValidateSource(options.SourceSchema); err != nil {
 		return Options{}, fmt.Errorf("--source-schema: %w", err)
 	}
-	if err := ident.ValidateSource(options.SourceTable); err != nil {
-		return Options{}, fmt.Errorf("--source-table: %w", err)
+	if options.SourceTable != "" {
+		if err := ident.ValidateSource(options.SourceTable); err != nil {
+			return Options{}, fmt.Errorf("--source-table: %w", err)
+		}
 	}
 	if err := ident.ValidateTarget(options.TargetSchema); err != nil {
 		return Options{}, fmt.Errorf("--target-schema: %w", err)
 	}
-	if err := ident.ValidateTarget(options.TargetTable); err != nil {
-		return Options{}, fmt.Errorf("--target-table: %w", err)
+	if options.TargetTable != "" {
+		if err := ident.ValidateTarget(options.TargetTable); err != nil {
+			return Options{}, fmt.Errorf("--target-table: %w", err)
+		}
 	}
 	options.MSSQLDSN = getenv("MSSQL_DSN")
 	options.PGSQLDSN = getenv("PGSQL_DSN")
 	if options.MSSQLDSN == "" || options.PGSQLDSN == "" {
 		return Options{}, ErrMissingDSN
+	}
+	return options, nil
+}
+
+func parseListTables(options Options, getenv func(string) string) (Options, error) {
+	if options.SourceTable != "" || options.AllTables {
+		return Options{}, errors.New("--list-tables cannot be combined with --source-table or --all-tables")
+	}
+	if options.Apply || options.DryRun {
+		return Options{}, errors.New("--list-tables does not accept --apply or --dry-run")
+	}
+	if options.TablesConfig != "" || options.TargetTable != "" || options.ShowExcluded {
+		return Options{}, errors.New("--list-tables does not accept --tables-config, --target-table or --show-excluded")
+	}
+	if err := ident.ValidateSource(options.SourceSchema); err != nil {
+		return Options{}, fmt.Errorf("--source-schema: %w", err)
+	}
+	options.MSSQLDSN = getenv("MSSQL_DSN")
+	if options.MSSQLDSN == "" {
+		return Options{}, ErrMissingMSSQLDSN
 	}
 	return options, nil
 }

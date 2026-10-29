@@ -1,0 +1,12 @@
+# Multi-table selection configuration schema. Copy this file to
+# config/tables.yaml, which is intentionally ignored because exclusions are
+# specific to each source database and operator policy.
+version: 1
+
+# Exact, case-sensitive SQL Server base-table names to skip. Names are matched
+# before the legacy PostgreSQL snake_case conversion. Replace these examples
+# with names returned by:
+#   ./bin/go-db-sync-mssql-pgsql --list-tables
+exclude:
+  - ExampleAuditLog
+  - ExampleTemporaryImport

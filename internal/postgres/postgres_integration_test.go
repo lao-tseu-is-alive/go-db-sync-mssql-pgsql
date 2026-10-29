@@ -78,6 +78,7 @@ func integrationTable(schemaName, tableName string) schema.Table {
 			{SourceName: "RawValue", TargetName: "rawvalue", PostgreSQLType: "bytea", Nullable: true},
 			{SourceName: "Enabled", TargetName: "enabled", PostgreSQLType: "boolean"},
 			{SourceName: "Amount", TargetName: "amount", PostgreSQLType: "numeric(20,4)"},
+			{SourceName: "Precise", TargetName: "precise", PostgreSQLType: "numeric(38,18)"},
 			{SourceName: "Identifier", TargetName: "identifier", PostgreSQLType: "uuid"},
 			{SourceName: "Happened", TargetName: "happened", PostgreSQLType: "timestamp without time zone"},
 			{SourceName: "Version", TargetName: "version", PostgreSQLType: "bigint"},
@@ -100,8 +101,8 @@ func TestReplaceCreatesMissingTargetAndPreservesExactValues(t *testing.T) {
 	id := uuid.MustParse("6f9619ff-8b86-d011-b42d-00c04fc964ff")
 	happened := time.Date(2026, 10, 28, 12, 34, 56, 123000000, time.UTC)
 	rows := [][]any{
-		{int64(1), nil, []byte{0, 1, 255}, true, numeric(t, "123456789012345.6789"), id, happened, int64(2003)},
-		{int64(2), "literal \\N\nunicode é漢字\nback\\slash\x1f", nil, false, numeric(t, "-1.2300"), uuid.New(), happened, int64(2004)},
+		{int64(1), nil, []byte{0, 1, 255}, true, numeric(t, "123456789012345.6789"), numeric(t, "12345678901234567890.123456789012345678"), id, happened, int64(2003)},
+		{int64(2), "literal \\N\nunicode é漢字\nback\\slash\x1f", nil, false, numeric(t, "-1.2300"), numeric(t, "-0.000000000000000001"), uuid.New(), happened, int64(2004)},
 	}
 	result, err := client.Publish(ctx, table, &sliceSource{rows: rows, errorAt: -1}, int64(len(rows)), syncmode.Replace)
 	if err != nil {
@@ -113,14 +114,16 @@ func TestReplaceCreatesMissingTargetAndPreservesExactValues(t *testing.T) {
 	var nullText *string
 	var raw []byte
 	var amount string
+	var precise string
 	var foundID uuid.UUID
 	if err := client.pool.QueryRow(ctx,
-		"SELECT textvalue, rawvalue, amount::text, identifier FROM "+qualifiedName(schemaName, table.TargetName)+" WHERE id = 1").
-		Scan(&nullText, &raw, &amount, &foundID); err != nil {
+		"SELECT textvalue, rawvalue, amount::text, precise::text, identifier FROM "+qualifiedName(schemaName, table.TargetName)+" WHERE id = 1").
+		Scan(&nullText, &raw, &amount, &precise, &foundID); err != nil {
 		t.Fatal(err)
 	}
-	if nullText != nil || fmt.Sprint(raw) != "[0 1 255]" || amount != "123456789012345.6789" || foundID != id {
-		t.Fatalf("exact values changed: text=%v raw=%v amount=%q id=%v", nullText, raw, amount, foundID)
+	if nullText != nil || fmt.Sprint(raw) != "[0 1 255]" || amount != "123456789012345.6789" ||
+		precise != "12345678901234567890.123456789012345678" || foundID != id {
+		t.Fatalf("exact values changed: text=%v raw=%v amount=%q precise=%q id=%v", nullText, raw, amount, precise, foundID)
 	}
 	var literal string
 	if err := client.pool.QueryRow(ctx, "SELECT textvalue FROM "+qualifiedName(schemaName, table.TargetName)+" WHERE id = 2").Scan(&literal); err != nil {
@@ -134,7 +137,7 @@ func TestReplaceCreatesMissingTargetAndPreservesExactValues(t *testing.T) {
 func TestMergeEmptySourceEmptiesTargetAfterVerifiedStage(t *testing.T) {
 	ctx, client, schemaName := integrationClient(t)
 	table := integrationTable(schemaName, "empty_source")
-	row := []any{int64(1), "old", nil, true, numeric(t, "1.0000"), uuid.New(), time.Now(), int64(1)}
+	row := []any{int64(1), "old", nil, true, numeric(t, "1.0000"), numeric(t, "1.000000000000000000"), uuid.New(), time.Now(), int64(1)}
 	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{row}, errorAt: -1}, 1, syncmode.Merge); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +242,7 @@ func TestInspectRejectsIncompatibleTarget(t *testing.T) {
 
 func integrationRow(t *testing.T, id int64, text string) []any {
 	t.Helper()
-	return []any{id, text, nil, true, numeric(t, "1.0000"), uuid.New(), time.Now(), id}
+	return []any{id, text, nil, true, numeric(t, "1.0000"), numeric(t, "1.000000000000000000"), uuid.New(), time.Now(), id}
 }
 
 func assertTextValue(t *testing.T, ctx context.Context, client *Client, schemaName, tableName, expected string) {

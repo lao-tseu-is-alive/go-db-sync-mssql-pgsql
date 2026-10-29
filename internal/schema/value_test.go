@@ -50,6 +50,30 @@ func TestMoneyPreservesDecimal(t *testing.T) {
 	}
 }
 
+func TestDecimalPreservesPrecisionAndScale(t *testing.T) {
+	t.Parallel()
+	const expected = "-12345678901234567890.123456789012345678"
+	actual, err := ConvertValue(Column{Conversion: ConversionDecimal}, []byte(expected))
+	if err != nil {
+		t.Fatal(err)
+	}
+	numeric := actual.(pgtype.Numeric)
+	value, err := numeric.Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != expected {
+		t.Fatalf("numeric value = %#v, want %q", value, expected)
+	}
+}
+
+func TestDecimalRejectsInexactDriverTypes(t *testing.T) {
+	t.Parallel()
+	if _, err := ConvertValue(Column{Conversion: ConversionDecimal}, 0.1); err == nil {
+		t.Fatal("decimal conversion accepted float64")
+	}
+}
+
 func TestUUIDConversion(t *testing.T) {
 	t.Parallel()
 	expected := uuid.MustParse("6f9619ff-8b86-d011-b42d-00c04fc964ff")

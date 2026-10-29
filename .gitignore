@@ -33,6 +33,12 @@ go.work.sum
 .env.*
 !.env.example
 
+# Operator-specific table selections and dated working lists.
+# Keep only config/config_Sample.yaml under version control.
+config/tables.yaml
+config/exclude_tables_*.txt
+config/exclude_tables_*.yaml
+
 # Editor/IDE
 .idea/
 .vscode/

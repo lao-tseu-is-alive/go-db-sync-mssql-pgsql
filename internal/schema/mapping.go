@@ -2,6 +2,8 @@ package schema
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"golang.org/x/text/cases"
@@ -9,11 +11,12 @@ import (
 )
 
 var lowerIdentifier = cases.Lower(language.Und)
+var numericTypePattern = regexp.MustCompile(`^(numeric|decimal)\(\s*([0-9]+)\s*,\s*([0-9]+)\s*\)$`)
 
 // MapColumn maps one SQL Server metadata column using the Phase 1 compatibility table.
 func MapColumn(source SourceColumn) (Column, error) {
 	typeName := strings.ToLower(strings.TrimSpace(source.TypeName))
-	targetType, conversion, err := mapType(typeName, source.MaxLength)
+	targetType, conversion, err := mapType(typeName, source.MaxLength, source.Precision, source.Scale)
 	if err != nil {
 		return Column{}, fmt.Errorf("column %q type %q: %w", source.Name, source.TypeName, err)
 	}
@@ -28,7 +31,7 @@ func MapColumn(source SourceColumn) (Column, error) {
 	}, nil
 }
 
-func mapType(typeName string, maxLength int) (string, Conversion, error) {
+func mapType(typeName string, maxLength, precision, scale int) (string, Conversion, error) {
 	switch typeName {
 	case "tinyint", "smallint", "int", "integer":
 		return "integer", ConversionDirect, nil
@@ -49,6 +52,14 @@ func mapType(typeName string, maxLength int) (string, Conversion, error) {
 		return "timestamp without time zone", ConversionDirect, nil
 	case "money", "smallmoney":
 		return "numeric(20,4)", ConversionMoney, nil
+	case "decimal", "numeric":
+		if precision < 1 || precision > 38 {
+			return "", 0, fmt.Errorf("invalid precision %d; SQL Server decimal/numeric precision must be 1..38", precision)
+		}
+		if scale < 0 || scale > precision {
+			return "", 0, fmt.Errorf("invalid scale %d for precision %d", scale, precision)
+		}
+		return fmt.Sprintf("numeric(%d,%d)", precision, scale), ConversionDecimal, nil
 	case "uniqueidentifier":
 		return "uuid", ConversionUUID, nil
 	case "timestamp", "rowversion":
@@ -62,8 +73,13 @@ func mapType(typeName string, maxLength int) (string, Conversion, error) {
 func CanonicalPostgreSQLType(value string) string {
 	value = strings.ToLower(strings.Join(strings.Fields(value), " "))
 	value = strings.ReplaceAll(value, "character(", "char(")
-	value = strings.ReplaceAll(value, "numeric(20, 4)", "numeric(20,4)")
-	value = strings.ReplaceAll(value, "decimal(20,4)", "numeric(20,4)")
+	if matches := numericTypePattern.FindStringSubmatch(value); matches != nil {
+		precision, precisionErr := strconv.Atoi(matches[2])
+		scale, scaleErr := strconv.Atoi(matches[3])
+		if precisionErr == nil && scaleErr == nil {
+			return fmt.Sprintf("numeric(%d,%d)", precision, scale)
+		}
+	}
 	if value == "timestamp" {
 		return "timestamp without time zone"
 	}

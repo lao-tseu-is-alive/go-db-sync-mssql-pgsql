@@ -43,6 +43,11 @@ test:
 integration-test:
 	go test -race -tags integration ./internal/postgres
 
+.PHONY: config-check
+## config-check: validate the tracked multi-table YAML sample
+config-check:
+	go test ./internal/tableconfig -run '^TestRepositoryConfig$$'
+
 .PHONY: binary
 ## binary: compile the CLI into bin/
 binary:
@@ -73,8 +78,8 @@ docs-assert:
 docs-check: godoc-check atlas-check docs-assert
 
 .PHONY: check
-## check: run formatting, lint, tests, documentation and whitespace gates
-check: fmt-check lint test docs-check
+## check: run formatting, lint, tests, config, documentation and whitespace gates
+check: fmt-check lint test config-check docs-check
 	git diff --check
 
 .PHONY: vuln-check

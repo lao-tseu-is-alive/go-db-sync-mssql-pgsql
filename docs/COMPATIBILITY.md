@@ -1,10 +1,10 @@
 # Legacy compatibility contract
 
-This Phase 1 implementation uses the local Python `mssql2pgsql` repository as
+This implementation uses the local Python `mssql2pgsql` repository as
 the semantic reference. It deliberately does not preserve its unsafe transfer
 mechanics.
 
-| Concern | Python behavior | Phase 1 behavior |
+| Concern | Python behavior | Go behavior |
 | --- | --- | --- |
 | Source/destination schema | SQL Server `dbo`; PostgreSQL `public` | Same defaults; both are explicit CLI options. |
 | Table name | Ordered `standard_table_names()` replacements, then `re.sub('(?!^)([A-Z]+)', r'_\1', ...).lower()` | Exact ordered port, covered for every replacement and uppercase-run edge cases. |
@@ -41,15 +41,16 @@ that detail rather than substituting a conventional snake-case algorithm.
 | `binary`, `varbinary` | `bytea` | Legacy-compatible target type, transferred as bytes. |
 | `smalldatetime`, `datetime` | `timestamp without time zone` | Legacy-compatible. |
 | `money`, `smallmoney` | `numeric(20,4)` | Legacy-compatible target type; decimal text is preserved without float conversion. |
+| `decimal(p,s)`, `numeric(p,s)` | `numeric(p,s)` | Deliberate exact correction: precision 1..38 and scale 0..precision are preserved; driver bytes are parsed without floating point. |
 | `uniqueidentifier` | `uuid` | Legacy-compatible. |
 | `timestamp`, `rowversion` | `bigint` | Interprets exactly 8 bytes as an unsigned big-endian value and rejects values above PostgreSQL signed `bigint`. |
 
-Phase 1 rejects `decimal`/`numeric`, `datetime2`, `datetimeoffset`, `date`,
-`time`, `float`, `real`, `image`, `xml`, `sql_variant`, spatial/CLR types and
-all unlisted types. The Python fallback emitted the SQLAlchemy type spelling,
-which is not a safe or unambiguous contract for precision, timezone or binary
-semantics. Adding any rejected type requires a documented mapping and exact
-value tests.
+The CLI rejects `datetime2`, `datetimeoffset`, `date`, `time`, `float`, `real`,
+`image`, `xml`, `sql_variant`, spatial/CLR types and all unlisted types. The
+Python fallback emitted the SQLAlchemy type spelling, which is not a safe or
+unambiguous contract for timezone or binary semantics. Decimal/numeric is a
+deliberate correction backed by metadata-boundary, exact-value and target-type
+tests. Adding any other rejected type requires the same evidence.
 
 The SQL Server driver exposes `uniqueidentifier` bytes in a configurable wire
 order. To avoid a DSN-dependent UUID permutation, the generated source `SELECT`
@@ -71,7 +72,7 @@ selected in their native driver representation.
 - Row count is checked after COPY and again after publication; merge also
   checks its staging table. The restored
   SQL Server database is assumed not to change between the initial count and
-  the streaming query; Phase 1 does not create a SQL Server snapshot.
+  the streaming query; the CLI does not create a SQL Server snapshot.
 - Source rows and DSNs are never logged. Driver errors are passed through a
   redactor before operator-facing output.
 
@@ -81,3 +82,6 @@ SQL Server source identifiers may be at most 128 Unicode code points and may
 not contain NUL/control characters. PostgreSQL identifiers must additionally
 fit 63 UTF-8 bytes. A lowercased column collision, an over-length transformed
 name, or an otherwise ambiguous mapping is refused before target mutation.
+In all-table mode, exclusions match these original SQL Server names exactly
+before any transformation. If two selected original names produce the same
+target name, the plan reports the collision and refuses every write.

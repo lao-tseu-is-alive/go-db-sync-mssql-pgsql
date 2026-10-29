@@ -23,6 +23,90 @@ func TestParseRequiresExplicitMode(t *testing.T) {
 	}
 }
 
+func TestParseRequiresExactlyOneTableSelection(t *testing.T) {
+	t.Parallel()
+	for _, arguments := range [][]string{
+		{"--dry-run"},
+		{"--source-table", "Thing", "--all-tables", "--dry-run"},
+	} {
+		if _, err := Parse(arguments, testEnv, &bytes.Buffer{}); err == nil {
+			t.Fatalf("Parse(%v) unexpectedly succeeded", arguments)
+		}
+	}
+}
+
+func TestParseAllTablesOptions(t *testing.T) {
+	t.Parallel()
+	options, err := Parse([]string{
+		"--all-tables", "--dry-run", "--tables-config=config/tables.yaml", "--workers=3", "--show-excluded",
+	}, testEnv, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.AllTables || options.TablesConfig != "config/tables.yaml" || options.Workers != 3 || !options.ShowExcluded {
+		t.Fatalf("multi-table options = %#v", options)
+	}
+	if options.TargetTable != "" {
+		t.Fatalf("TargetTable = %q, want empty", options.TargetTable)
+	}
+}
+
+func TestParseListTablesNeedsOnlyMSSQL(t *testing.T) {
+	t.Parallel()
+	options, err := Parse([]string{"--list-tables", "--source-schema=archive"}, func(name string) string {
+		if name == "MSSQL_DSN" {
+			return "sqlserver://source"
+		}
+		return ""
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.ListTables || options.SourceSchema != "archive" || options.PGSQLDSN != "" {
+		t.Fatalf("list options = %#v", options)
+	}
+}
+
+func TestParseListTablesRejectsSynchronizationFlags(t *testing.T) {
+	t.Parallel()
+	for _, arguments := range [][]string{
+		{"--list-tables", "--source-table=Thing"},
+		{"--list-tables", "--all-tables"},
+		{"--list-tables", "--dry-run"},
+		{"--list-tables", "--apply"},
+		{"--list-tables", "--tables-config=config/tables.yaml"},
+		{"--list-tables", "--target-table=thing"},
+		{"--list-tables", "--show-excluded"},
+	} {
+		if _, err := Parse(arguments, testEnv, &bytes.Buffer{}); err == nil {
+			t.Fatalf("Parse(%v) unexpectedly succeeded", arguments)
+		}
+	}
+}
+
+func TestParseListTablesRequiresMSSQL(t *testing.T) {
+	t.Parallel()
+	_, err := Parse([]string{"--list-tables"}, func(string) string { return "" }, &bytes.Buffer{})
+	if !errors.Is(err, ErrMissingMSSQLDSN) {
+		t.Fatalf("Parse error = %v", err)
+	}
+}
+
+func TestParseRejectsInvalidMultiTableCombinations(t *testing.T) {
+	t.Parallel()
+	tests := [][]string{
+		{"--source-table", "Thing", "--dry-run", "--tables-config=config/tables.yaml"},
+		{"--source-table", "Thing", "--dry-run", "--show-excluded"},
+		{"--all-tables", "--dry-run", "--target-table=thing"},
+		{"--all-tables", "--dry-run", "--workers=0"},
+	}
+	for _, arguments := range tests {
+		if _, err := Parse(arguments, testEnv, &bytes.Buffer{}); err == nil {
+			t.Fatalf("Parse(%v) unexpectedly succeeded", arguments)
+		}
+	}
+}
+
 func TestParseAppliesLegacyTargetName(t *testing.T) {
 	t.Parallel()
 	options, err := Parse([]string{"--source-table", "AFF_OPCThing", "--dry-run"}, testEnv, &bytes.Buffer{})
@@ -37,6 +121,9 @@ func TestParseAppliesLegacyTargetName(t *testing.T) {
 	}
 	if options.SyncMode != syncmode.Replace {
 		t.Fatalf("SyncMode = %q", options.SyncMode)
+	}
+	if options.Workers != 2 {
+		t.Fatalf("Workers = %d", options.Workers)
 	}
 }
 

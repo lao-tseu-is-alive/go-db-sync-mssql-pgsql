@@ -1,4 +1,4 @@
-// Package mssql discovers and streams one read-only SQL Server table.
+// Package mssql discovers and streams read-only SQL Server tables.
 package mssql
 
 import (
@@ -32,7 +32,10 @@ func Open(ctx context.Context, dsn string) (*Client, error) {
 		db.Close()
 		return nil, fmt.Errorf("connect to SQL Server: %w", err)
 	}
-	db.SetMaxOpenConns(2)
+	// A client is owned by one bounded worker. Keep one physical connection per
+	// client so --workers is also the source-connection upper bound.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	return &Client{db: db}, nil
 }
 
@@ -49,6 +52,40 @@ func (client *Client) Close() error {
 // EnablePerformanceMetrics enables opt-in per-row read, scan and conversion timings.
 func (client *Client) EnablePerformanceMetrics(enabled bool) {
 	client.performanceMetrics = enabled
+}
+
+const tablesQuery = `
+SELECT tb.name
+FROM sys.schemas AS s
+JOIN sys.tables AS tb ON tb.schema_id = s.schema_id
+WHERE s.name = @p1 AND tb.is_ms_shipped = 0
+ORDER BY tb.name`
+
+// Tables returns the original names of all user base tables in one source schema.
+func (client *Client) Tables(ctx context.Context, sourceSchema string) ([]string, error) {
+	if err := ident.ValidateSource(sourceSchema); err != nil {
+		return nil, fmt.Errorf("source schema: %w", err)
+	}
+	rows, err := client.db.QueryContext(ctx, tablesQuery, sourceSchema)
+	if err != nil {
+		return nil, fmt.Errorf("discover SQL Server base tables: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan SQL Server base table: %w", err)
+		}
+		if err := ident.ValidateSource(name); err != nil {
+			return nil, fmt.Errorf("discovered source table %q: %w", name, err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate SQL Server base tables: %w", err)
+	}
+	return names, nil
 }
 
 const metadataQuery = `

@@ -16,13 +16,15 @@ const (
 	ConversionDirect Conversion = iota
 	// ConversionMoney parses the driver's exact decimal bytes as pgtype.Numeric.
 	ConversionMoney
+	// ConversionDecimal parses an exact decimal/numeric driver representation.
+	ConversionDecimal
 	// ConversionUUID normalizes the driver's 16-byte UUID representation.
 	ConversionUUID
 	// ConversionRowVersion converts an eight-byte big-endian rowversion to signed bigint.
 	ConversionRowVersion
 )
 
-// SourceColumn is the SQL Server metadata required by Phase 1.
+// SourceColumn is the SQL Server metadata required for lossless mapping.
 type SourceColumn struct {
 	// Name is the source column identifier.
 	Name string
@@ -58,7 +60,7 @@ type Column struct {
 	Conversion Conversion
 }
 
-// Table is the complete Phase 1 contract for one explicitly selected table.
+// Table is the complete contract for one explicitly selected table.
 type Table struct {
 	// SourceSchema is the SQL Server schema identifier.
 	SourceSchema string

@@ -1,9 +1,10 @@
 # Performance evidence and profiling
 
 This document separates observed measurements from inference and future
-recommendations. Phase 1 correctness and atomic publication remain
-non-negotiable; no concurrency or unrelated optimization is justified without
-a new comparable measurement.
+recommendations. Per-table correctness and atomic publication remain
+non-negotiable. Phase 2 introduces only fixed, operator-selected table-level
+concurrency; dynamic concurrency and unrelated optimization require new
+comparable evidence.
 
 ## Existing operator baseline
 
@@ -144,6 +145,6 @@ the result, so neither run is the performance baseline.
    conversion dominates, use the profile and allocation evidence to identify a
    specific type path. If the COPY remainder dominates, inspect pgx encoding,
    socket writes and PostgreSQL COPY processing.
-3. Do not add workers or concurrent table transfer. The CLI must first retain
-   exact values, bounded memory, one-table scope and transactional publication
-   while demonstrating a repeatable bottleneck.
+3. Keep `--workers` fixed and operator-selected. Do not add dynamic concurrency
+   or concurrency inside one table; retain exact values, bounded per-table
+   streaming and transactional publication while measuring database pressure.

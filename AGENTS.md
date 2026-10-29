@@ -2,7 +2,13 @@
 
 ## Mission and scope
 
-Build a small, reliable Go CLI that reproduces the **functional behavior** of the existing Python `mssql2pgsql` utility while improving streaming efficiency, error handling, and safe publishing. **Phase 1 must implement and test ONE explicitly selected MSSQL table only.** No whole-database synchronization, scheduler, CDC, Change Tracking, Kafka, Airbyte, web API, or Kubernetes deployment in this phase. Do not generalize prematurely.
+Build a small, reliable Go CLI that reproduces the **functional behavior** of
+the existing Python `mssql2pgsql` utility while improving streaming efficiency,
+error handling and safe publishing. Phase 1 established one-table behavior.
+Phase 2 adds deterministic full-snapshot replication for all base tables in one
+configured MSSQL schema while retaining the same single-table engine. No
+scheduler, CDC, Change Tracking, Kafka, Airbyte, distributed orchestration,
+dynamic concurrency, web API or Kubernetes deployment belongs in this phase.
 
 Source MSSQL is a Linux-hosted SQL Server database restored nightly at 21:30 from a production backup taken at 20:00. It is a snapshot, not a live change stream. The CLI must access MSSQL read-only. PostgreSQL is the target. A complete refresh is the intended operation. Do not assume data newer than the backup.
 
@@ -10,17 +16,17 @@ Work in the current repository `go-db-sync-mssql-pgsql`; use Go module `github.c
 
 ## Current state and durable hand-off
 
-As of 2026-10-29, `v0.2.0` is the current release baseline. It implements the
-guarded, one-table Phase 1 synchronization, optional `./.env` loading, periodic
-apply progress, detailed performance metrics, local CPU profiling and explicit
-`replace`/`merge` publication modes.
+As of 2026-10-29, `v0.3.0` is the current release baseline. It retains guarded
+single-table synchronization and adds Phase 2 `--all-tables`, source-only table
+listing, exact-name YAML exclusions, a bounded worker pool, compact plans and
+exact decimal/numeric mapping without changing the default replace mode.
 
 Post-v0.2.0, the default branch also owns `.github/workflows/release.yml`. A
 semantic-version tag triggers the repository release gate, static Linux
 amd64/arm64 builds, SHA-256 checksums and a GitHub release whose notes come from
 the matching changelog section. Manual dispatch accepts only an existing tag
-that matches the source version; use it to publish assets for `v0.2.0`, whose
-tag predates the workflow.
+that matches the source version. The existing `v0.2.0` tag was successfully
+published through that manual path because its tag predates the workflow.
 
 The authoritative current-state documents are:
 
@@ -44,6 +50,29 @@ The current operator-facing diagnostic options and behavior are:
 - `--cpu-profile=<new-file>` writes a local `runtime/pprof` CPU profile without
   an HTTP listener and refuses to overwrite an existing file.
 
+Multi-table behavior is deliberately narrow:
+
+- `--list-tables` performs a source-only metadata inventory, requires only
+  `MSSQL_DSN`, never connects to PostgreSQL and prints exact original base-table
+  names one per line;
+- `--all-tables` discovers user base tables only in `--source-schema`;
+  `--tables-config` contains exact, case-sensitive original MSSQL names to
+  exclude before target-name conversion;
+- `config/config_Sample.yaml` is the tracked public template;
+  `config/tables.yaml` and dated exclusion working files are local operator
+  state and must remain ignored;
+- the complete plan is sorted and validated before any write, and selected
+  sources that map to one target make the plan fail closed;
+- all-table plans suppress individual excluded-table lines by default while
+  preserving their count; `--show-excluded` restores full detail;
+- `--workers` defaults to two and bounds both goroutines and independently
+  connected MSSQL/PostgreSQL client pairs;
+- each table uses the unchanged replace/merge transaction, so a multi-table run
+  is not database-wide atomic;
+- the first failure cancels in-flight work and leaves queued jobs unstarted;
+  committed tables remain committed, the command exits nonzero and downstream
+  imports must wait for complete aggregate success.
+
 `--sync-mode=replace|merge` selects PostgreSQL publication. `replace` is the
 default for the disposable daily transit database: after target compatibility
 validation it starts a transaction, truncates an existing target with
@@ -56,9 +85,9 @@ must remain stable.
 Run `--perf-metrics` and `--cpu-profile` in separate refreshes against
 equivalent target state: per-row clock reads can pollute a CPU profile, and
 both diagnostic modes perturb the run rather than define a baseline. Preserve
-the existing typed streaming, transactional publication, data correctness and
-one-table scope while measuring. Do not add concurrency or make a major
-optimization before reporting concrete measurements.
+the existing typed streaming, transactional publication and data correctness.
+Do not add concurrency beyond the fixed Phase 2 table-worker bound or make a
+major optimization before reporting concrete measurements.
 
 Existing operator evidence for `dbo.goelandtextindex` (5,607,406 rows) shows
 Go `v0.1.0` at 92.510 seconds versus Python at 102.832 seconds. Go staging/COPY
@@ -94,22 +123,29 @@ Analyze actual Python behavior and record a short compatibility matrix in `docs/
 - For **table names**, reproduce `standard_table_names()` followed by `convert_to_snake_case()` exactly, including acronym replacements and their order. Port to Go with table-driven tests covering ordinary names, multiple uppercase runs and every special acronym. Do not replace with a generic snake_case library.
 - IMPORTANT: for **column names**, the Python `get_postgresql_create_sql` uses `c['name'].lower()`; it does **not** use `convert_to_snake_case`. Preserve lowercasing of column names by default. Explicitly document any collision/unsupported identifier cases; refuse ambiguous mappings rather than silently merging columns.
 - Preserve source column order; preserve SQL Server primary-key column order where defined; copy PK, nullability and supported type mapping to the destination when creating a table. Do not add new constraints or silently alter existing destination schema.
-- Review the legacy type mapping carefully: TINYINT/SMALLINT/INTEGER to integer; BIGINT to bigint; BIT to boolean; VARCHAR/NVARCHAR/NCHAR/TEXT/NTEXT to text; CHAR(n) to char(n); BINARY/VARBINARY to bytea; SMALLDATETIME/DATETIME to timestamp; MONEY/SMALLMONEY to decimal(20,4); UNIQUEIDENTIFIER to uuid; SQL Server `timestamp`/`rowversion` is **not** a datetime: legacy maps it to PostgreSQL bigint. Explicitly implement its 8-byte conversion and test byte order/unsigned range. When legacy mappings are unsupported, incorrect or ambiguous (e.g. precision, datetime2, decimal, datetimeoffset, binary, SQL_VARIANT), fail clearly or document a deliberate correction with tests; **never silently coerce data**.
+- Review the legacy type mapping carefully: TINYINT/SMALLINT/INTEGER to integer; BIGINT to bigint; BIT to boolean; VARCHAR/NVARCHAR/NCHAR/TEXT/NTEXT to text; CHAR(n) to char(n); BINARY/VARBINARY to bytea; SMALLDATETIME/DATETIME to timestamp; MONEY/SMALLMONEY to decimal(20,4); SQL Server DECIMAL/NUMERIC to PostgreSQL `numeric(p,s)` with exact metadata and byte-to-numeric conversion; UNIQUEIDENTIFIER to uuid; SQL Server `timestamp`/`rowversion` is **not** a datetime: legacy maps it to PostgreSQL bigint. Explicitly implement its 8-byte conversion and test byte order/unsigned range. When mappings remain unsupported, incorrect or ambiguous (e.g. datetime2, datetimeoffset, SQL_VARIANT), fail clearly or document a deliberate correction with tests; **never silently coerce data**.
 - SQL NULL must remain a real PostgreSQL NULL, distinct from the literal text `\\N`; preserve multiline text, backslashes, control characters, UTF-8, decimal precision, UUIDs, binary values and timestamps accurately. Avoid hand-built delimited text and the Python CSV-like escaping behavior.
 - If the destination table is absent, create it from discovered metadata. If present, validate expected columns/types before modifying data; reject incompatible structures with an actionable error. No automatic DROP/ALTER in Phase 1.
 - Full refresh semantics: replace the selected table's contents, never append duplicates. An empty source must produce an empty destination **only after successful transfer and verification**.
 - Support read-only source and write-enabled target credentials separately. Validate and safely quote SQL identifiers; SQL parameters cannot bind identifiers. No arbitrary SQL supplied by command-line arguments.
 
-## Proposed implementation for Phase 1
+## Established Phase 1 implementation
 
 - Drivers: `github.com/microsoft/go-mssqldb` via `database/sql` for MSSQL and `github.com/jackc/pgx/v5` for PostgreSQL. Prefer direct typed row streaming into `pgx.CopyFrom`, implementing a small `CopyFromSource` adapter over SQL Server rows. No ORM, no ODBC, no CSV/temp files, no full-table buffering.
 - Keep modules/packages minimal and cohesive, e.g. `cmd/go-db-sync-mssql-pgsql`, `internal/mssql`, `internal/postgres`, `internal/sync`, `internal/naming`, `internal/config`; adjust only if a simpler structure works better.
-- Minimal CLI interface: `--source-table` (required for a sync), optional `--source-schema=dbo`, `--target-schema=public`, `--dry-run`, `--version` and `--help`. Target table defaults to the legacy transformation; any explicit override must be validated. Provide a way to list source tables if it is easy and useful, but do not expand into all-table execution.
+- The CLI chooses exactly one of `--source-table` and `--all-tables`. Optional
+  `--tables-config` applies only to all-table mode; `--target-table` applies only
+  to single-table mode. `--list-tables` is a separate source-only exploration
+  action and accepts neither dry-run nor apply. Schema defaults, version and help
+  behavior remain common to all modes.
 - Credentials and connection settings via environment variables (or secret-free config references), e.g. `MSSQL_DSN` and `PGSQL_DSN`; support `.env.example` with placeholders only. Do not log DSNs. Protect and redact errors containing connection details.
 - Prefer a bounded-memory, one-table transfer. Default `replace` mode uses one transaction to `TRUNCATE ... RESTRICT`, COPY directly into the compatible target, verify counts and commit; rollback restores prior contents on any failure. It never uses `CASCADE`. Optional `merge` mode preserves verified temporary staging followed by UPSERT/DELETE reconciliation for dependency-sensitive targets. Never commit partial batches to the live table.
 - COUNT(*) comparison is necessary but insufficient for data correctness; add deterministic targeted tests comparing exact row values. The database snapshot is assumed static during each test/sync; document the consistency assumption and avoid mismatching different source snapshots for verification.
 - Use `context.Context` for cancellation, timeouts and cleanup. Always inspect `rows.Err()` and `CopyFrom` errors. On failure, preserve the existing live target and return nonzero status; clean merge staging safely. Avoid retaining or logging personally identifiable source rows. Log counts, table identifier, COPY/stage timings, duration, rows/sec and clear redacted errors.
-- Start sequentially and with **one table only**. Do not implement workers/concurrent-table transfer until measurements justify it. Favor readable, maintainable Go code, small functions and explicit errors (`%w`).
+- The reusable synchronization engine handles exactly one prepared table. Phase
+  2 orchestration may invoke it through a fixed worker pool but must not duplicate
+  its discovery, streaming or publication logic. Favor readable, maintainable Go
+  code, small functions and explicit errors (`%w`).
 - Database write operations **must require explicit execution**. `--dry-run` performs discovery and validates metadata without mutating PostgreSQL; a normal sync may modify the selected target table, so provide an explicit `--apply` flag or equivalent guard. Describe this behavior in help and README.
 
 ## Tests, evidence, and performance
@@ -117,7 +153,10 @@ Analyze actual Python behavior and record a short compatibility matrix in `docs/
 - Unit tests for naming parity (including all acronym special cases), identifier quoting/validation, column mapping and SQL Server-to-PostgreSQL value conversions: NULL vs literal `\\N`, Unicode, multiline text, backslashes, booleans, money/decimal, UUID, timestamps, rowversion, binary.
 - Tests for missing target creation, target-schema incompatibility, empty table, replacement of existing data, failure during `COPY`, count mismatch, foreign-key restriction, rollback and preservation of prior target data; separate integration tests requiring real test databases from normal unit tests. No automatic writes to production or shared databases.
 - Implement a simple benchmark procedure in `docs/BENCHMARK.md` comparing **the same table/snapshot** against the current Python implementation: row count, elapsed time, rows/sec, peak RSS and CPU if available. Do not claim any speedup until measured; capture exact commands and reproducibility conditions. Avoid copying sensitive row samples into documentation.
-- After one table works end to end, **stop and report findings**, including unresolved mapping differences and measurements. Do not start all-table replication without a new instruction.
+- Keep integration tests opt-in and isolated from production/shared databases.
+  Multi-table orchestration is covered with deterministic fakes; PostgreSQL
+  transaction semantics remain covered by the existing disposable-database
+  integration suite.
 
 ## Documentation and Makefile contract
 
@@ -137,13 +176,20 @@ Adapt the applicable conventions in the reference `docs/DOCUMENTATION.md` as a *
 - Keep generated artifacts distinguished from authoritative files; never commit secrets, real data exports, `.env`, connection strings, temporary COPY files, binaries or coverage reports.
 - Update README, atlas, roadmap, implementation status and changelog honestly in the same slice. Do not mark roadmap items done before functionality and tests actually pass.
 
-## Immediate task and acceptance criteria
+## Current acceptance boundary
 
-1. Inspect both local reference repositories, summarize naming/type-mapping semantics and applicable documentation/Makefile rules; identify any ambiguity rather than guessing.
-2. Set up the minimal Go CLI, configuration, version metadata, Makefile, documentation contract/atlas and practical checks.
-3. Implement **one-table** introspection, safe table creation or validation, streamed full copy, transactional publication, and row-count verification.
-4. Add unit and opt-in integration tests; implement a benchmark protocol. Do not connect to real services unless the operator explicitly permits it.
-5. Run `make check`, `make docs-check`, and relevant tests; report actual results and any checks blocked by environment.
-6. Stop. Provide a short summary: changed files, precise naming compatibility, supported/unresolved types, measured behavior if databases were authorized, limitations and the single best next step.
+Phase 2 is limited to all base tables in one configured source schema. Planning
+must retain original names for exact exclusions, preserve legacy mapping, reject
+collisions, validate all targets before writes and sort deterministically. Apply
+uses a fixed worker pool, independent connections and per-table transactions.
+Cancellation is fail-fast and reported for every selected table. Never claim
+database-wide atomicity; downstream consumers start only after complete success.
 
-**Priority:** correct output and safety first; then streaming efficiency; then minimal operational ergonomics. Implement the immediate task, not a speculative platform.
+Run `make check` for each completed slice and report opt-in integration tests
+that were skipped because no disposable DSN was authorized. Do not connect to
+real services without explicit operator permission. Stop after the focused
+multi-table implementation; do not add scheduling, CDC or infrastructure.
+
+**Priority:** correct output and safety first; then bounded throughput; then
+minimal operational ergonomics. Implement the current task, not a speculative
+platform.

@@ -18,7 +18,9 @@ func ConvertValue(column Column, value any) (any, error) {
 	case ConversionDirect:
 		return value, nil
 	case ConversionMoney:
-		return convertMoney(value)
+		return convertNumeric("money", value)
+	case ConversionDecimal:
+		return convertNumeric("decimal/numeric", value)
 	case ConversionUUID:
 		return convertUUID(value)
 	case ConversionRowVersion:
@@ -28,7 +30,7 @@ func ConvertValue(column Column, value any) (any, error) {
 	}
 }
 
-func convertMoney(value any) (pgtype.Numeric, error) {
+func convertNumeric(label string, value any) (pgtype.Numeric, error) {
 	var text string
 	switch typed := value.(type) {
 	case []byte:
@@ -36,11 +38,11 @@ func convertMoney(value any) (pgtype.Numeric, error) {
 	case string:
 		text = typed
 	default:
-		return pgtype.Numeric{}, fmt.Errorf("money value has driver type %T, want exact decimal bytes", value)
+		return pgtype.Numeric{}, fmt.Errorf("%s value has driver type %T, want exact decimal bytes", label, value)
 	}
 	var numeric pgtype.Numeric
 	if err := numeric.Scan(text); err != nil {
-		return pgtype.Numeric{}, fmt.Errorf("parse money value: %w", err)
+		return pgtype.Numeric{}, fmt.Errorf("parse %s value: %w", label, err)
 	}
 	return numeric, nil
 }

@@ -1,4 +1,4 @@
-// Command go-db-sync-mssql-pgsql performs a guarded full refresh of one SQL Server table.
+// Command go-db-sync-mssql-pgsql performs guarded SQL Server snapshot refreshes.
 package main
 
 import (
@@ -28,7 +28,7 @@ func main() {
 
 func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int {
 	options, err := config.Parse(arguments, os.Getenv, stderr)
-	if errors.Is(err, config.ErrMissingDSN) {
+	if errors.Is(err, config.ErrMissingDSN) || errors.Is(err, config.ErrMissingMSSQLDSN) {
 		loaded, loadErr := config.LoadDotEnv(".env")
 		if loadErr != nil {
 			fmt.Fprintf(stderr, "error: load .env: %v\n", loadErr)
@@ -48,6 +48,12 @@ func run(ctx context.Context, arguments []string, stdout, stderr io.Writer) int 
 	if options.Version {
 		fmt.Fprintln(stdout, version.String())
 		return 0
+	}
+	if options.ListTables {
+		return runListTables(ctx, options, stdout, stderr)
+	}
+	if options.AllTables {
+		return runAllTables(ctx, options, stdout, stderr)
 	}
 
 	connectCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -182,9 +188,13 @@ func printPerformance(output io.Writer, report syncer.Report) {
 }
 
 func progressPrinter(output io.Writer) func(syncer.Progress) {
+	return progressPrinterWithPrefix(output, "")
+}
+
+func progressPrinterWithPrefix(output io.Writer, prefix string) func(syncer.Progress) {
 	return func(progress syncer.Progress) {
 		if progress.Phase != "staging" && progress.Phase != "copying" {
-			fmt.Fprintf(output, "phase=%s\n", progress.Phase)
+			fmt.Fprintf(output, "%sphase=%s\n", prefix, progress.Phase)
 			return
 		}
 		percent := 0.0
@@ -195,7 +205,7 @@ func progressPrinter(output io.Writer) func(syncer.Progress) {
 		if progress.Elapsed > 0 {
 			rate = float64(progress.Rows) / progress.Elapsed.Seconds()
 		}
-		fmt.Fprintf(output, "phase=%s rows=%d/%d percent=%.1f elapsed=%s rows_per_second=%.1f\n",
-			progress.Phase, progress.Rows, progress.TotalRows, percent, progress.Elapsed.Round(time.Second), rate)
+		fmt.Fprintf(output, "%sphase=%s rows=%d/%d percent=%.1f elapsed=%s rows_per_second=%.1f\n",
+			prefix, progress.Phase, progress.Rows, progress.TotalRows, percent, progress.Elapsed.Round(time.Second), rate)
 	}
 }

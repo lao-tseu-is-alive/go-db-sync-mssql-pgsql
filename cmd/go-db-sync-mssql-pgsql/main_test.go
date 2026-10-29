@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/config"
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/multisync"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/postgres"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/stream"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/syncer"
@@ -20,7 +22,7 @@ func TestVersionDoesNotNeedConnections(t *testing.T) {
 	if code := run(context.Background(), []string{"--version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run returned %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "v0.2.0") {
+	if !strings.Contains(stdout.String(), "v0.3.0") {
 		t.Fatalf("version output = %q", stdout.String())
 	}
 }
@@ -115,5 +117,43 @@ func TestNoModeFailsBeforeConnections(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "exactly one") {
 		t.Fatalf("error output = %q", stderr.String())
+	}
+}
+
+func TestWriteTableNamesUsesExactDeterministicOrder(t *testing.T) {
+	t.Parallel()
+	var output bytes.Buffer
+	if err := writeTableNames(&output, []string{"XMLDocument", "Document", "document"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "Document\nXMLDocument\ndocument\n"; got != want {
+		t.Fatalf("table list = %q, want %q", got, want)
+	}
+}
+
+func TestApplyPlanSuppressesExcludedDetailsUnlessRequested(t *testing.T) {
+	t.Parallel()
+	plan := multisync.Plan{SourceSchema: "dbo", TargetSchema: "public", Tables: []multisync.TablePlan{
+		{SourceName: "Selected", TargetName: "selected"},
+		{SourceName: "Excluded", TargetName: "excluded", Excluded: true},
+	}}
+	prepared := []preparedTable{
+		{plan: plan.Tables[0], report: syncer.Report{SourceRows: 2}},
+		{plan: plan.Tables[1]},
+	}
+	var compact bytes.Buffer
+	printPlan(&compact, config.Options{Apply: true}, plan, prepared, time.Second)
+	if strings.Contains(compact.String(), "source=dbo.Excluded") || !strings.Contains(compact.String(), "excluded=1 excluded_details=false") {
+		t.Fatalf("compact apply plan = %q", compact.String())
+	}
+	var detailed bytes.Buffer
+	printPlan(&detailed, config.Options{Apply: true, ShowExcluded: true}, plan, prepared, time.Second)
+	if !strings.Contains(detailed.String(), "source=dbo.Excluded") || !strings.Contains(detailed.String(), "excluded_details=true") {
+		t.Fatalf("detailed apply plan = %q", detailed.String())
+	}
+	var dryRun bytes.Buffer
+	printPlan(&dryRun, config.Options{DryRun: true}, plan, prepared, time.Second)
+	if strings.Contains(dryRun.String(), "source=dbo.Excluded") || !strings.Contains(dryRun.String(), "excluded_details=false") {
+		t.Fatalf("dry-run plan = %q", dryRun.String())
 	}
 }

@@ -15,11 +15,20 @@ require_literal() {
     fi
 }
 
-# Explicit mutation authorization and Phase 1 scope.
+# Explicit mutation authorization and Phase 2 selection scope.
 require_literal internal/config/config.go 'choose exactly one of --dry-run or --apply' 'explicit mode guard'
 require_literal README.md 'can occur without `--apply`' 'operator apply guard'
-require_literal AGENTS.md '**Phase 1 must implement and test ONE explicitly selected MSSQL table only.**' 'one-table scope'
-require_literal README.md 'stops at one table per invocation' 'one-table operator scope'
+require_literal internal/config/config.go 'choose exactly one of --source-table or --all-tables' 'table selection guard'
+require_literal internal/config/config.go 'list exact SQL Server base-table names without connecting to PostgreSQL' 'source-only listing flag'
+require_literal README.md 'PostgreSQL connection and performs metadata reads only.' 'source-only listing boundary'
+require_literal internal/config/config.go '"workers", 2' 'bounded worker default'
+require_literal internal/config/config.go '"show-excluded", false' 'compact apply-plan default'
+require_literal internal/schema/mapping.go 'return fmt.Sprintf("numeric(%d,%d)", precision, scale), ConversionDecimal, nil' 'exact decimal type mapping'
+require_literal README.md 'without floating-point conversion' 'documented exact decimal conversion'
+require_literal README.md 'They are not' 'multi-table transaction boundary'
+require_literal README.md 'database-wide atomic' 'database-wide atomicity warning'
+require_literal README.md 'imports ready only after complete success' 'downstream readiness guard'
+require_literal config/config_Sample.yaml 'version: 1' 'tracked exact-exclusion sample schema'
 
 # Defaults and naming behavior must agree.
 require_literal internal/config/config.go '"source-schema", "dbo"' 'source schema default'
@@ -52,7 +61,7 @@ require_literal docs/IMPLEMENTATION_STATUS.md 'source remains static' 'source co
 require_literal AGENTS.md '[`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) is the normative documentation' 'agent documentation entry point'
 require_literal README.md '[documentation quality contract](docs/DOCUMENTATION.md) is normative' 'README documentation entry point'
 require_literal Makefile 'docs-check: godoc-check atlas-check docs-assert' 'documentation gate composition'
-require_literal Makefile 'check: fmt-check lint test docs-check' 'normal gate composition'
+require_literal Makefile 'check: fmt-check lint test config-check docs-check' 'normal gate composition'
 require_literal .github/workflows/ci.yml 'run: make release-check' 'CI repository gate'
 require_literal .github/workflows/release.yml 'contents: write' 'release contents permission'
 require_literal .github/workflows/release.yml 'run: make release-check' 'release repository gate'
