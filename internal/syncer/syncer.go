@@ -9,6 +9,7 @@ import (
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/postgres"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/schema"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/stream"
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/syncmode"
 )
 
 // Source discovers, counts and streams one SQL Server table.
@@ -21,7 +22,7 @@ type Source interface {
 // Target validates and publishes one PostgreSQL table.
 type Target interface {
 	Inspect(context.Context, schema.Table) (postgres.Status, error)
-	Publish(context.Context, schema.Table, stream.Source, int64) (postgres.Result, error)
+	Publish(context.Context, schema.Table, stream.Source, int64, syncmode.Mode) (postgres.Result, error)
 }
 
 // Request identifies the only table and whether mutation is explicitly authorized.
@@ -36,9 +37,11 @@ type Request struct {
 	TargetTable string
 	// Apply authorizes publication; false is a read-only dry run.
 	Apply bool
-	// ProgressInterval is the minimum interval between staging row reports.
+	// SyncMode selects direct replacement or staged reconciliation.
+	SyncMode syncmode.Mode
+	// ProgressInterval is the minimum interval between COPY row reports.
 	ProgressInterval time.Duration
-	// Progress receives phase and staging-count updates; nil disables reporting.
+	// Progress receives phase and COPY-count updates; nil disables reporting.
 	Progress func(Progress)
 }
 
@@ -68,6 +71,22 @@ type Report struct {
 	Applied bool
 	// Duration is the total orchestration duration.
 	Duration time.Duration
+	// Performance contains coarse orchestration and detailed publication timings.
+	Performance Performance
+}
+
+// Performance contains timing evidence for source discovery, validation and transfer.
+type Performance struct {
+	// DiscoveryDuration covers SQL Server table metadata discovery and mapping.
+	DiscoveryDuration time.Duration
+	// TargetValidationDuration covers the read-only PostgreSQL compatibility check.
+	TargetValidationDuration time.Duration
+	// SourceCountDuration covers SQL Server COUNT_BIG execution.
+	SourceCountDuration time.Duration
+	// SourceQueryDuration covers opening the forward-only SQL Server row query.
+	SourceQueryDuration time.Duration
+	// Publication contains COPY and transactional PostgreSQL timings.
+	Publication postgres.Performance
 }
 
 // Service coordinates the source and target adapters sequentially.
@@ -85,38 +104,51 @@ func New(source Source, target Target) *Service {
 func (service *Service) Run(ctx context.Context, request Request) (Report, error) {
 	started := time.Now()
 	emitProgress(request.Progress, Progress{Phase: "discovering"})
+	phaseStarted := time.Now()
 	table, err := service.source.Describe(ctx, request.SourceSchema, request.SourceTable, request.TargetSchema, request.TargetTable)
 	if err != nil {
 		return Report{}, fmt.Errorf("discover source table: %w", err)
 	}
+	performance := Performance{DiscoveryDuration: time.Since(phaseStarted)}
 	emitProgress(request.Progress, Progress{Phase: "validating-target"})
+	phaseStarted = time.Now()
 	status, err := service.target.Inspect(ctx, table)
 	if err != nil {
 		return Report{}, fmt.Errorf("validate target table: %w", err)
 	}
+	performance.TargetValidationDuration = time.Since(phaseStarted)
 	emitProgress(request.Progress, Progress{Phase: "counting-source"})
+	phaseStarted = time.Now()
 	count, err := service.source.Count(ctx, table)
 	if err != nil {
 		return Report{}, err
 	}
-	report := Report{Table: table, SourceRows: count, TargetStatus: status}
+	performance.SourceCountDuration = time.Since(phaseStarted)
+	report := Report{Table: table, SourceRows: count, TargetStatus: status, Performance: performance}
 	if !request.Apply {
 		report.Duration = time.Since(started)
 		return report, nil
 	}
-	emitProgress(request.Progress, Progress{Phase: "staging", TotalRows: count})
+	transferPhase := "staging"
+	if request.SyncMode == syncmode.Replace {
+		transferPhase = "copying"
+	}
+	emitProgress(request.Progress, Progress{Phase: transferPhase, TotalRows: count})
+	phaseStarted = time.Now()
 	rows, err := service.source.Rows(ctx, table)
 	if err != nil {
 		return Report{}, err
 	}
+	report.Performance.SourceQueryDuration = time.Since(phaseStarted)
 	if request.Progress != nil && request.ProgressInterval > 0 {
-		rows = newProgressSource(rows, count, request.ProgressInterval, request.Progress)
+		rows = newProgressSource(rows, count, transferPhase, request.ProgressInterval, request.Progress)
 	}
-	result, err := service.target.Publish(ctx, table, rows, count)
+	result, err := service.target.Publish(ctx, table, rows, count, request.SyncMode)
 	if err != nil {
 		return Report{}, err
 	}
 	report.Publication = result
+	report.Performance.Publication = result.Performance
 	report.Applied = true
 	report.Duration = time.Since(started)
 	return report, nil

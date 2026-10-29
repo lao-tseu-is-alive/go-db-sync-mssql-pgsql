@@ -12,7 +12,7 @@ mechanics.
 | Column and PK order | Reflection order; PK output is accidentally column order | Source column order is preserved; SQL Server PK key order is preserved deliberately. |
 | Nullability | Reflected into `NOT NULL` | Same for a newly created target and validated on an existing target. |
 | Data transfer | Values converted to delimited text, `\N` overloaded as NULL, 20,000-row partial commits | Typed, bounded-memory `pgx.CopyFrom`; SQL NULL and literal `\N` remain distinct. |
-| Refresh | Live table truncated before transfer | Staging is verified first; publication and final count check are one PostgreSQL transaction. |
+| Refresh | Live table truncated before transfer | Default `replace` truncates with `RESTRICT`, direct-COPYs and verifies in one rollback-safe transaction; optional `merge` preserves verified staging and reconciliation. |
 | Existing target | Structure is not validated | Exact ordered columns, mapped types, nullability and PK order are required. No DROP/ALTER. |
 | Empty source | Truncates the target before copy | Publishes an empty verified stage atomically. |
 
@@ -63,11 +63,13 @@ selected in their native driver representation.
   can select only schema/table identifiers, never an SQL expression.
 - A missing target is created from source metadata. An existing target is
   validated before source rows are copied or live rows are touched.
-- Publication upserts by the source primary key and removes absent keys. This
-  preserves referenced rows where keys remain. Without a primary key it uses
-  transactional delete-and-insert. Constraint or dependency failures roll the
-  transaction back, preserving the previous live contents.
-- Row count is checked in staging and again after publication. The restored
+- Default `replace` publication uses `TRUNCATE TABLE ... RESTRICT` and direct
+  COPY in one transaction. It never uses `CASCADE`; unsupported incoming
+  foreign-key dependencies fail and rollback. Optional `merge` upserts by the
+  source primary key and removes absent keys, preserving referenced rows where
+  keys remain; without a primary key it uses transactional delete-and-insert.
+- Row count is checked after COPY and again after publication; merge also
+  checks its staging table. The restored
   SQL Server database is assumed not to change between the initial count and
   the streaming query; Phase 1 does not create a SQL Server snapshot.
 - Source rows and DSNs are never logged. Driver errors are passed through a

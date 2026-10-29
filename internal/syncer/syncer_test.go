@@ -8,11 +8,14 @@ import (
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/postgres"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/schema"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/stream"
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/syncmode"
 )
 
 type fakeSource struct {
 	table      schema.Table
 	rowsCalled bool
+	rows       stream.Source
+	rowsErr    error
 }
 
 func (source *fakeSource) Describe(context.Context, string, string, string, string) (schema.Table, error) {
@@ -25,11 +28,12 @@ func (source *fakeSource) Count(context.Context, schema.Table) (int64, error) {
 
 func (source *fakeSource) Rows(context.Context, schema.Table) (stream.Source, error) {
 	source.rowsCalled = true
-	return nil, errors.New("unexpected rows call")
+	return source.rows, source.rowsErr
 }
 
 type fakeTarget struct {
 	publishCalled bool
+	publishMode   syncmode.Mode
 	inspectErr    error
 }
 
@@ -37,8 +41,9 @@ func (target *fakeTarget) Inspect(context.Context, schema.Table) (postgres.Statu
 	return postgres.Status{Compatible: target.inspectErr == nil}, target.inspectErr
 }
 
-func (target *fakeTarget) Publish(context.Context, schema.Table, stream.Source, int64) (postgres.Result, error) {
+func (target *fakeTarget) Publish(_ context.Context, _ schema.Table, _ stream.Source, _ int64, mode syncmode.Mode) (postgres.Result, error) {
 	target.publishCalled = true
+	target.publishMode = mode
 	return postgres.Result{}, nil
 }
 
@@ -64,5 +69,18 @@ func TestIncompatibleTargetStopsBeforeSourceCountAndRows(t *testing.T) {
 	}
 	if source.rowsCalled || target.publishCalled {
 		t.Fatal("incompatible target reached transfer")
+	}
+}
+
+func TestApplyPassesReplaceModeToTarget(t *testing.T) {
+	t.Parallel()
+	source := &fakeSource{table: schema.Table{}}
+	target := &fakeTarget{}
+	report, err := New(source, target).Run(context.Background(), Request{Apply: true, SyncMode: syncmode.Replace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Applied || !source.rowsCalled || !target.publishCalled || target.publishMode != syncmode.Replace {
+		t.Fatalf("replace orchestration report=%#v source=%#v target=%#v", report, source, target)
 	}
 }

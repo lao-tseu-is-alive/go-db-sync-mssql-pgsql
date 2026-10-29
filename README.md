@@ -1,6 +1,6 @@
 # go-db-sync-mssql-pgsql
 
-Current version: **v0.1.0**.
+Current version: **v0.2.0**.
 
 `go-db-sync-mssql-pgsql` is a small Go CLI for a verified full refresh of one
 explicitly selected SQL Server table into PostgreSQL. Phase 1 intentionally
@@ -19,21 +19,22 @@ backup is outside this tool's view.
   can occur without `--apply`.
 - A dry run discovers SQL Server metadata, maps and validates it, counts source
   rows and validates an existing PostgreSQL target without mutation.
-- An apply streams typed rows into a PostgreSQL temporary staging table with
-  bounded memory. Staging count, publication and final count verification occur
-  before the PostgreSQL transaction commits.
+- An apply streams typed rows with bounded memory. Default `replace` mode uses
+  one PostgreSQL transaction to truncate an existing compatible target with
+  `RESTRICT`, COPY directly into it, verify counts and commit.
+- `--sync-mode=merge` retains the original temporary staging, count verification
+  and UPSERT/DELETE reconciliation when existing row identity must be preserved.
 - A COPY, constraint, dependency or verification failure rolls back the whole
   PostgreSQL transaction and preserves the previous live target.
 - Existing targets must match ordered columns, types, nullability and primary
   key exactly. Phase 1 never drops or alters them.
 - DSNs and source row values are never logged.
 
-With a primary key, publication upserts matching keys and deletes keys absent
-from staging, which keeps referenced rows stable when their keys remain. A
-missing referenced key can still make deletion fail; that failure is safe and
-rolls back. Without a primary key, publication uses transactional
-delete-and-insert and therefore takes a stronger write lock and may be rejected
-by dependencies.
+Replace mode never uses `TRUNCATE CASCADE`. It takes an `ACCESS EXCLUSIVE` lock
+and fails explicitly when incoming foreign keys prevent `TRUNCATE ... RESTRICT`;
+use merge mode for those targets. In merge mode, a primary key enables upsert
+plus deletion of absent keys, preserving referenced rows whose keys remain.
+Without a primary key, merge uses transactional delete-and-insert.
 
 ## Build and test
 
@@ -67,22 +68,55 @@ export PGSQL_DSN='postgres://<target-user>:<db-password>@<target-host>:5432/<tar
 # Read-only discovery and validation.
 ./bin/go-db-sync-mssql-pgsql --source-table Employe --dry-run
 
-# Explicitly authorized one-table refresh.
+# Explicitly authorized one-table replacement (default).
 ./bin/go-db-sync-mssql-pgsql --source-table Employe --apply
+
+# Dependency-preserving staged reconciliation.
+./bin/go-db-sync-mssql-pgsql \
+  --source-table Employe --apply --sync-mode=merge
 ```
 
 The dotenv parser accepts `NAME=value`, optional `export`, and single- or
 double-quoted values. It does not execute or expand shell expressions.
 
-Defaults are `--source-schema=dbo`, `--target-schema=public`, and a target table
-name produced by the exact legacy Python transform. `--target-table` may
-override that name but remains a validated, quoted identifier. Run `--help`
-for the complete interface.
+Defaults are `--source-schema=dbo`, `--target-schema=public`,
+`--sync-mode=replace`, and a target table name produced by the exact legacy
+Python transform. `--target-table` may override that name but remains a
+validated, quoted identifier. Run `--help` for the complete interface.
 
-During an apply, the CLI reports the current phase and staging progress every
-five seconds: rows copied, percentage, elapsed time and rows/second. Use
+During an apply, the CLI reports the current phase and COPY progress every five
+seconds: rows copied, percentage, elapsed time and rows/second. Replace reports
+`phase=copying`; merge reports `phase=staging`. Use
 `--progress-interval=30s` to reduce output or `--progress-interval=0` to disable
 progress reporting. Progress contains counts and timings only, never row data.
+
+### Performance evidence
+
+Use opt-in detailed timings to separate SQL Server row fetching/decoding,
+`Rows.Scan`, value conversion, the remaining `pgx.CopyFrom` pipeline, optional
+merge staging, replace truncation and transactional live publication:
+
+```sh
+./bin/go-db-sync-mssql-pgsql \
+  --source-table goelandtextindex --apply --perf-metrics
+```
+
+An optional CPU profile uses Go's local `runtime/pprof` writer; it does not
+start a network listener and refuses to overwrite an existing file:
+
+```sh
+./bin/go-db-sync-mssql-pgsql \
+  --source-table goelandtextindex --apply \
+  --cpu-profile=/tmp/goelandtextindex.cpu.pprof
+
+go tool pprof -top \
+  ./bin/go-db-sync-mssql-pgsql /tmp/goelandtextindex.cpu.pprof
+```
+
+Run detailed timers and CPU profiling in separate refreshes: otherwise timer
+calls can pollute the CPU profile. Both modes perturb the run, so neither is a
+baseline benchmark. Measurement definitions, the existing 5.6-million-row
+baseline and recommendations are in [PERFORMANCE.md](docs/PERFORMANCE.md).
 
 ## Compatibility and supported types
 

@@ -24,7 +24,11 @@ through the environment without echoing them.
 ```sh
 /usr/bin/time -v ./bin/go-db-sync-mssql-pgsql \
   --source-schema dbo --source-table <selected-table> \
-  --target-schema public --apply
+  --target-schema public --apply --sync-mode=replace
+
+/usr/bin/time -v ./bin/go-db-sync-mssql-pgsql \
+  --source-schema dbo --source-table <selected-table> \
+  --target-schema public --apply --sync-mode=merge
 
 cd /home/cgil/PycharmProjects/mssql2pgsql
 /usr/bin/time -v uv run python copy_Mssql_Table_to_Postgresql.py <selected-table>
@@ -62,3 +66,24 @@ publication step to preserve the previous live table on failure. Peak RSS,
 exact host load and a multi-trial median were not captured, and the target setup
 differed (Python reported an existing empty table; Go created its target), so
 this is useful operator evidence rather than the complete controlled protocol.
+
+Detailed attribution and reproducible conversion microbenchmarks live in
+[`PERFORMANCE.md`](PERFORMANCE.md).
+
+## Replace versus merge measurement — 2026-10-29
+
+One operator-authorized instrumented trial of each mode ran sequentially on
+`dbo.Document` with the same reported source count of 2,361,511 rows. Both
+started with the compatible target populated from the same snapshot.
+
+| Mode | Real | User | System | Peak RSS | COPY | Stage | Publication | Correctness |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Replace | 81.12 s | 191.75 s | 34.48 s | 19,216 KiB | 80.617 s direct | 0 s | 80.807 s including COPY | source = copied = published = 2,361,511 |
+| Merge | 97.82 s | 185.55 s | 29.71 s | 22,896 KiB | 77.760 s staged | 78.063 s | 19.508 s after staging | source = copied = published = 2,361,511 |
+
+Replace was 16.70 seconds (17.1%) faster in wall time and its overall
+throughput was 20.6% higher. Both commands used `--perf-metrics`, so this is a
+same-conditions diagnostic comparison rather than the required three-trial,
+uninstrumented release benchmark. Publication and COPY overlap in replace and
+must not be summed. See [`PERFORMANCE.md`](PERFORMANCE.md) for phase attribution
+and limitations.

@@ -25,7 +25,7 @@ func TestProgressSourceReportsFinalCount(t *testing.T) {
 	t.Parallel()
 	underlying := &progressTestSource{rows: [][]any{{1}, {2}, {3}}}
 	var events []Progress
-	source := newProgressSource(underlying, 3, time.Hour, func(event Progress) {
+	source := newProgressSource(underlying, 3, "copying", time.Hour, func(event Progress) {
 		events = append(events, event)
 	})
 	for source.Next() {
@@ -36,7 +36,7 @@ func TestProgressSourceReportsFinalCount(t *testing.T) {
 	if err := source.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || events[0].Rows != 3 || events[0].TotalRows != 3 {
+	if len(events) != 1 || events[0].Phase != "copying" || events[0].Rows != 3 || events[0].TotalRows != 3 {
 		t.Fatalf("progress events = %#v", events)
 	}
 }

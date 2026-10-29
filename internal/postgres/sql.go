@@ -36,6 +36,10 @@ func createStageSQL(table schema.Table, stageName string) string {
 	return "CREATE TEMP TABLE " + quote(stageName) + " (LIKE " + qualifiedName(table.TargetSchema, table.TargetName) + ") ON COMMIT DROP"
 }
 
+func truncateTableSQL(table schema.Table) string {
+	return "TRUNCATE TABLE " + qualifiedName(table.TargetSchema, table.TargetName) + " RESTRICT"
+}
+
 func publicationSQL(table schema.Table, stageName string) []string {
 	target := qualifiedName(table.TargetSchema, table.TargetName)
 	columns := quotedList(table.TargetColumnNames())

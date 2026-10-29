@@ -3,8 +3,11 @@ package postgres
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/schema"
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/stream"
 )
 
 func testTable() schema.Table {
@@ -14,6 +17,32 @@ func testTable() schema.Table {
 			{SourceName: "ID", TargetName: "id", PostgreSQLType: "integer", PKOrdinal: 1},
 			{SourceName: "Name", TargetName: "name", PostgreSQLType: "text", Nullable: true},
 		},
+	}
+}
+
+func TestCopyPipelineRemainderSubtractsMeasuredSourceWork(t *testing.T) {
+	t.Parallel()
+	performance := Performance{
+		CopyFromDuration: 10 * time.Second,
+		Source: stream.Metrics{
+			NextDuration: 4 * time.Second, ScanDuration: time.Second, ConversionDuration: 2 * time.Second,
+		},
+	}
+	if actual := performance.CopyPipelineRemainder(); actual != 3*time.Second {
+		t.Fatalf("CopyPipelineRemainder = %s", actual)
+	}
+}
+
+func TestPublicationStatementClassification(t *testing.T) {
+	t.Parallel()
+	withKey := testTable()
+	if publicationStatementIsDelete(withKey, 0) || !publicationStatementIsDelete(withKey, 1) {
+		t.Fatal("primary-key publication statement classification is wrong")
+	}
+	withoutKey := testTable()
+	withoutKey.Columns[0].PKOrdinal = 0
+	if !publicationStatementIsDelete(withoutKey, 0) || publicationStatementIsDelete(withoutKey, 1) {
+		t.Fatal("keyless publication statement classification is wrong")
 	}
 }
 
@@ -33,6 +62,27 @@ func TestValidateTarget(t *testing.T) {
 	}
 }
 
+func TestTargetCatalogMarkersAcceptBinaryQChar(t *testing.T) {
+	t.Parallel()
+	var column targetColumn
+	codec := pgtype.QCharCodec{}
+	for name, destination := range map[string]*byte{
+		"identity":  &column.identity,
+		"generated": &column.generated,
+	} {
+		plan := codec.PlanScan(nil, pgtype.QCharOID, pgtype.BinaryFormatCode, destination)
+		if plan == nil {
+			t.Fatalf("%s marker does not accept PostgreSQL binary qchar", name)
+		}
+		if err := plan.Scan([]byte{'a'}, destination); err != nil {
+			t.Fatalf("scan %s marker: %v", name, err)
+		}
+		if *destination != 'a' {
+			t.Fatalf("%s marker = %q, want %q", name, *destination, byte('a'))
+		}
+	}
+}
+
 func TestCreateTablePreservesColumnsAndKeyOrder(t *testing.T) {
 	t.Parallel()
 	table := testTable()
@@ -40,6 +90,17 @@ func TestCreateTablePreservesColumnsAndKeyOrder(t *testing.T) {
 	expected := `CREATE TABLE "public"."thing" ("id" integer NOT NULL, "name" text, PRIMARY KEY ("id"))`
 	if actual != expected {
 		t.Fatalf("create SQL = %q, want %q", actual, expected)
+	}
+}
+
+func TestTruncateUsesQualifiedIdentifierAndRestrict(t *testing.T) {
+	t.Parallel()
+	actual := truncateTableSQL(testTable())
+	if actual != `TRUNCATE TABLE "public"."thing" RESTRICT` {
+		t.Fatalf("truncate SQL = %q", actual)
+	}
+	if strings.Contains(actual, "CASCADE") {
+		t.Fatalf("truncate SQL must never cascade: %q", actual)
 	}
 }
 

@@ -15,14 +15,15 @@ type progressSource struct {
 	lastReportedRows int64
 	started          time.Time
 	lastReportedAt   time.Time
+	phase            string
 	interval         time.Duration
 	callback         func(Progress)
 }
 
-func newProgressSource(source stream.Source, totalRows int64, interval time.Duration, callback func(Progress)) stream.Source {
+func newProgressSource(source stream.Source, totalRows int64, phase string, interval time.Duration, callback func(Progress)) stream.Source {
 	now := time.Now()
 	return &progressSource{
-		source: source, totalRows: totalRows, started: now, lastReportedAt: now,
+		source: source, totalRows: totalRows, phase: phase, started: now, lastReportedAt: now,
 		interval: interval, callback: callback,
 	}
 }
@@ -52,6 +53,14 @@ func (source *progressSource) Close() error {
 	return source.source.Close()
 }
 
+func (source *progressSource) StreamMetrics() stream.Metrics {
+	provider, ok := source.source.(stream.MetricsProvider)
+	if !ok {
+		return stream.Metrics{}
+	}
+	return provider.StreamMetrics()
+}
+
 func (source *progressSource) report(final bool) {
 	now := time.Now()
 	if !final && now.Sub(source.lastReportedAt) < source.interval {
@@ -61,7 +70,7 @@ func (source *progressSource) report(final bool) {
 		return
 	}
 	source.callback(Progress{
-		Phase: "staging", Rows: source.rows, TotalRows: source.totalRows,
+		Phase: source.phase, Rows: source.rows, TotalRows: source.totalRows,
 		Elapsed: now.Sub(source.started),
 	})
 	source.lastReportedRows = source.rows

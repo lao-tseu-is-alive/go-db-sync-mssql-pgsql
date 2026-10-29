@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/syncmode"
 )
 
 func testEnv(name string) string {
@@ -33,6 +35,24 @@ func TestParseAppliesLegacyTargetName(t *testing.T) {
 	if options.ProgressInterval != 5*time.Second {
 		t.Fatalf("ProgressInterval = %s", options.ProgressInterval)
 	}
+	if options.SyncMode != syncmode.Replace {
+		t.Fatalf("SyncMode = %q", options.SyncMode)
+	}
+}
+
+func TestParseSyncMode(t *testing.T) {
+	t.Parallel()
+	options, err := Parse([]string{"--source-table", "Thing", "--apply", "--sync-mode=merge"}, testEnv, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.SyncMode != syncmode.Merge {
+		t.Fatalf("SyncMode = %q", options.SyncMode)
+	}
+	_, err = Parse([]string{"--source-table", "Thing", "--apply", "--sync-mode=append"}, testEnv, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "choose replace or merge") {
+		t.Fatalf("unsupported mode error = %v", err)
+	}
 }
 
 func TestParseRejectsNegativeProgressInterval(t *testing.T) {
@@ -40,6 +60,19 @@ func TestParseRejectsNegativeProgressInterval(t *testing.T) {
 	_, err := Parse([]string{"--source-table", "Thing", "--dry-run", "--progress-interval=-1s"}, testEnv, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "cannot be negative") {
 		t.Fatalf("Parse error = %v", err)
+	}
+}
+
+func TestParsePerformanceOptions(t *testing.T) {
+	t.Parallel()
+	options, err := Parse([]string{
+		"--source-table", "Thing", "--dry-run", "--perf-metrics", "--cpu-profile=/tmp/test.cpu.pprof",
+	}, testEnv, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.PerformanceMetrics || options.CPUProfile != "/tmp/test.cpu.pprof" {
+		t.Fatalf("performance options = %#v", options)
 	}
 }
 

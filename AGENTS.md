@@ -8,6 +8,65 @@ Source MSSQL is a Linux-hosted SQL Server database restored nightly at 21:30 fro
 
 Work in the current repository `go-db-sync-mssql-pgsql`; use Go module `github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql`. Do not modify either reference repository.
 
+## Current state and durable hand-off
+
+As of 2026-10-29, `v0.2.0` is the current release baseline. It implements the
+guarded, one-table Phase 1 synchronization, optional `./.env` loading, periodic
+apply progress, detailed performance metrics, local CPU profiling and explicit
+`replace`/`merge` publication modes.
+
+The authoritative current-state documents are:
+
+- [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) for completed
+  behavior, planned work, assumptions and known gaps;
+- [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for metric definitions, measured
+  evidence and recommendations;
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) for task state and the next authorized
+  action;
+- [`CHANGELOG.md`](CHANGELOG.md) for released and unreleased behavior.
+
+The current operator-facing diagnostic options and behavior are:
+
+- missing DSNs fall back to `./.env`, while exported environment variables keep
+  precedence and secret values are never logged;
+- apply progress is reported every five seconds by default;
+  `--progress-interval=<duration>` changes the cadence and
+  `--progress-interval=0` disables it;
+- `--perf-metrics` enables per-row SQL Server `Rows.Next`, `Rows.Scan` and value
+  conversion timings plus COPY and PostgreSQL phase attribution;
+- `--cpu-profile=<new-file>` writes a local `runtime/pprof` CPU profile without
+  an HTTP listener and refuses to overwrite an existing file.
+
+`--sync-mode=replace|merge` selects PostgreSQL publication. `replace` is the
+default for the disposable daily transit database: after target compatibility
+validation it starts a transaction, truncates an existing target with
+`RESTRICT`, copies directly into the target, verifies counts and commits. It
+never uses `CASCADE`; COPY, count, constraint and dependency failures roll the
+transaction back. `merge` preserves the original verified staging plus
+UPSERT/DELETE implementation for targets whose row identity or dependencies
+must remain stable.
+
+Run `--perf-metrics` and `--cpu-profile` in separate refreshes against
+equivalent target state: per-row clock reads can pollute a CPU profile, and
+both diagnostic modes perturb the run rather than define a baseline. Preserve
+the existing typed streaming, transactional publication, data correctness and
+one-table scope while measuring. Do not add concurrency or make a major
+optimization before reporting concrete measurements.
+
+Existing operator evidence for `dbo.goelandtextindex` (5,607,406 rows) shows
+Go `v0.1.0` at 92.510 seconds versus Python at 102.832 seconds. Go staging/COPY
+accounted for 86.894 seconds (94.0% of CLI time), while transactional
+publication took 5.256 seconds (5.7%). This points investigation at the
+source-to-stage pipeline but does not identify whether SQL Server reading,
+driver decoding, pgx encoding/I/O or PostgreSQL staging insertion dominates.
+Instrumented `dbo.Document` runs established that COPY/encoding and merge
+publication dominate; detailed replace-versus-merge evidence belongs in
+`docs/PERFORMANCE.md` and must be kept comparable by using the same snapshot
+and equivalent populated target state. The 2026-10-29 matched trials copied and
+published 2,361,511 rows: replace took 81.12 seconds and merge 97.82 seconds.
+Treat the 17.1% observed reduction as single-trial evidence, not a general
+speedup claim.
+
 ## Mandatory references — read before coding
 
 1. Legacy Python implementation, available locally at `/home/cgil/PycharmProjects/mssql2pgsql` (public: https://github.com/lao-tseu-is-alive/mssql2pgsql). Read **actual files**, especially:
@@ -40,16 +99,16 @@ Analyze actual Python behavior and record a short compatibility matrix in `docs/
 - Keep modules/packages minimal and cohesive, e.g. `cmd/go-db-sync-mssql-pgsql`, `internal/mssql`, `internal/postgres`, `internal/sync`, `internal/naming`, `internal/config`; adjust only if a simpler structure works better.
 - Minimal CLI interface: `--source-table` (required for a sync), optional `--source-schema=dbo`, `--target-schema=public`, `--dry-run`, `--version` and `--help`. Target table defaults to the legacy transformation; any explicit override must be validated. Provide a way to list source tables if it is easy and useful, but do not expand into all-table execution.
 - Credentials and connection settings via environment variables (or secret-free config references), e.g. `MSSQL_DSN` and `PGSQL_DSN`; support `.env.example` with placeholders only. Do not log DSNs. Protect and redact errors containing connection details.
-- Prefer a bounded-memory, one-table transfer. Stage rows into a temporary or dedicated staging table of compatible structure, verify counts, then publish atomically in a PostgreSQL transaction. Choose a strategy that works for a table with existing constraints/dependencies; explain locking and performance tradeoffs. Never TRUNCATE the live target **before** a potentially failing transfer and never commit partial batches to the live table.
+- Prefer a bounded-memory, one-table transfer. Default `replace` mode uses one transaction to `TRUNCATE ... RESTRICT`, COPY directly into the compatible target, verify counts and commit; rollback restores prior contents on any failure. It never uses `CASCADE`. Optional `merge` mode preserves verified temporary staging followed by UPSERT/DELETE reconciliation for dependency-sensitive targets. Never commit partial batches to the live table.
 - COUNT(*) comparison is necessary but insufficient for data correctness; add deterministic targeted tests comparing exact row values. The database snapshot is assumed static during each test/sync; document the consistency assumption and avoid mismatching different source snapshots for verification.
-- Use `context.Context` for cancellation, timeouts and cleanup. Always inspect `rows.Err()` and `CopyFrom` errors. On failure, preserve the existing live target and return nonzero status; clean staging safely. Avoid retaining or logging personally identifiable source rows. Log counts, table identifier, stage timings, duration, rows/sec and clear redacted errors.
+- Use `context.Context` for cancellation, timeouts and cleanup. Always inspect `rows.Err()` and `CopyFrom` errors. On failure, preserve the existing live target and return nonzero status; clean merge staging safely. Avoid retaining or logging personally identifiable source rows. Log counts, table identifier, COPY/stage timings, duration, rows/sec and clear redacted errors.
 - Start sequentially and with **one table only**. Do not implement workers/concurrent-table transfer until measurements justify it. Favor readable, maintainable Go code, small functions and explicit errors (`%w`).
 - Database write operations **must require explicit execution**. `--dry-run` performs discovery and validates metadata without mutating PostgreSQL; a normal sync may modify the selected target table, so provide an explicit `--apply` flag or equivalent guard. Describe this behavior in help and README.
 
 ## Tests, evidence, and performance
 
 - Unit tests for naming parity (including all acronym special cases), identifier quoting/validation, column mapping and SQL Server-to-PostgreSQL value conversions: NULL vs literal `\\N`, Unicode, multiline text, backslashes, booleans, money/decimal, UUID, timestamps, rowversion, binary.
-- Tests for missing target creation, target-schema incompatibility, empty table, failure during `COPY`, rollback and preservation of prior target data; separate integration tests requiring real test databases from normal unit tests. No automatic writes to production or shared databases.
+- Tests for missing target creation, target-schema incompatibility, empty table, replacement of existing data, failure during `COPY`, count mismatch, foreign-key restriction, rollback and preservation of prior target data; separate integration tests requiring real test databases from normal unit tests. No automatic writes to production or shared databases.
 - Implement a simple benchmark procedure in `docs/BENCHMARK.md` comparing **the same table/snapshot** against the current Python implementation: row count, elapsed time, rows/sec, peak RSS and CPU if available. Do not claim any speedup until measured; capture exact commands and reproducibility conditions. Avoid copying sensitive row samples into documentation.
 - After one table works end to end, **stop and report findings**, including unresolved mapping differences and measurements. Do not start all-table replication without a new instruction.
 
@@ -75,7 +134,7 @@ Adapt the applicable conventions in the reference `docs/DOCUMENTATION.md` as a *
 
 1. Inspect both local reference repositories, summarize naming/type-mapping semantics and applicable documentation/Makefile rules; identify any ambiguity rather than guessing.
 2. Set up the minimal Go CLI, configuration, version metadata, Makefile, documentation contract/atlas and practical checks.
-3. Implement **one-table** introspection, safe table creation or validation, streamed full copy to staging, transactional publication, and row-count verification.
+3. Implement **one-table** introspection, safe table creation or validation, streamed full copy, transactional publication, and row-count verification.
 4. Add unit and opt-in integration tests; implement a benchmark protocol. Do not connect to real services unless the operator explicitly permits it.
 5. Run `make check`, `make docs-check`, and relevant tests; report actual results and any checks blocked by environment.
 6. Stop. Provide a short summary: changed files, precise naming compatibility, supported/unresolved types, measured behavior if databases were authorized, limitations and the single best next step.

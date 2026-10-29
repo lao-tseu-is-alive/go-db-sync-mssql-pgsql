@@ -65,8 +65,16 @@ inputs are distinguished in descriptions.
 Stable security and operational claims shared across code and prose SHOULD be
 asserted in `scripts/check_documentation_claims.sh`. Assertions are deliberately
 literal and visible. They cover the explicit apply guard, one-table boundary,
-schema defaults, secret handling, snapshot assumption and control-chain links;
-they do not replace behavioral tests.
+schema defaults, publication-mode default, prohibition on `TRUNCATE CASCADE`,
+secret handling, snapshot assumption and control-chain links; they do not
+replace behavioral tests.
+
+Operator documentation MUST identify destructive behavior and its transaction
+boundary. In particular, the default `replace` mode is described as
+transactional `TRUNCATE ... RESTRICT` followed by direct COPY and count
+verification, while `merge` is described as the staging-based compatibility
+mode. Documentation MUST NOT imply that `--dry-run` or a failed transaction
+publishes partial data.
 
 A checker change MUST include tests showing accepted and rejected cases where
 practical. `cmd/doccheck` has unit tests for atlas drift and GoDoc omissions.

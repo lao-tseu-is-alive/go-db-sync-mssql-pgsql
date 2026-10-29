@@ -5,6 +5,8 @@ and this pre-1.0 project uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-29
+
 ### Changed
 
 - The CLI now loads an optional `./.env` when either DSN is absent from the
@@ -12,6 +14,25 @@ and this pre-1.0 project uses semantic versioning.
   are neither expanded nor logged.
 - Applied refreshes now report their phase and, every five seconds, staged rows,
   percentage, elapsed time and throughput. `--progress-interval=0` disables it.
+- Added `--perf-metrics` for source/COPY/PostgreSQL phase attribution and
+  `--cpu-profile=<new-file>` for opt-in local `runtime/pprof` CPU profiles.
+  Instrumentation does not alter the selected publication strategy.
+- Added `--sync-mode=replace|merge`. `replace` is the new default for disposable
+  transit targets and performs rollback-safe `TRUNCATE ... RESTRICT` plus direct
+  COPY; `merge` preserves the previous staged UPSERT/DELETE implementation.
+
+### Fixed
+
+- Existing PostgreSQL targets can now be validated with pgx binary results:
+  catalog identity/generated markers use PostgreSQL's internal `"char"` codec
+  instead of being scanned into incompatible Go strings.
+
+### Known limitations
+
+- Destructive PostgreSQL integration scenarios compiled under the race detector
+  but skipped because no separate `DBSYNC_TEST_PGSQL_DSN` was supplied. The
+  operator-authorized `Document` replace and merge runs both completed with
+  matching source, copied and committed counts.
 
 ## [0.1.0] - 2026-10-28
 

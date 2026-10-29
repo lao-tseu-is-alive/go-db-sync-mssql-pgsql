@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/schema"
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/syncmode"
 )
 
 type sliceSource struct {
@@ -92,7 +94,7 @@ func numeric(t *testing.T, value string) pgtype.Numeric {
 	return result
 }
 
-func TestPublishCreatesMissingTargetAndPreservesExactValues(t *testing.T) {
+func TestReplaceCreatesMissingTargetAndPreservesExactValues(t *testing.T) {
 	ctx, client, schemaName := integrationClient(t)
 	table := integrationTable(schemaName, "exact_values")
 	id := uuid.MustParse("6f9619ff-8b86-d011-b42d-00c04fc964ff")
@@ -101,7 +103,7 @@ func TestPublishCreatesMissingTargetAndPreservesExactValues(t *testing.T) {
 		{int64(1), nil, []byte{0, 1, 255}, true, numeric(t, "123456789012345.6789"), id, happened, int64(2003)},
 		{int64(2), "literal \\N\nunicode é漢字\nback\\slash\x1f", nil, false, numeric(t, "-1.2300"), uuid.New(), happened, int64(2004)},
 	}
-	result, err := client.Publish(ctx, table, &sliceSource{rows: rows, errorAt: -1}, int64(len(rows)))
+	result, err := client.Publish(ctx, table, &sliceSource{rows: rows, errorAt: -1}, int64(len(rows)), syncmode.Replace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,14 +131,14 @@ func TestPublishCreatesMissingTargetAndPreservesExactValues(t *testing.T) {
 	}
 }
 
-func TestPublishEmptySourceEmptiesTargetAfterVerifiedStage(t *testing.T) {
+func TestMergeEmptySourceEmptiesTargetAfterVerifiedStage(t *testing.T) {
 	ctx, client, schemaName := integrationClient(t)
 	table := integrationTable(schemaName, "empty_source")
 	row := []any{int64(1), "old", nil, true, numeric(t, "1.0000"), uuid.New(), time.Now(), int64(1)}
-	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{row}, errorAt: -1}, 1); err != nil {
+	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{row}, errorAt: -1}, 1, syncmode.Merge); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Publish(ctx, table, &sliceSource{errorAt: -1}, 0); err != nil {
+	if _, err := client.Publish(ctx, table, &sliceSource{errorAt: -1}, 0, syncmode.Merge); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -145,15 +147,37 @@ func TestPublishEmptySourceEmptiesTargetAfterVerifiedStage(t *testing.T) {
 	}
 }
 
-func TestCopyFailureRollsBackAndPreservesTarget(t *testing.T) {
+func TestReplaceRemovesExistingData(t *testing.T) {
 	ctx, client, schemaName := integrationClient(t)
-	table := integrationTable(schemaName, "copy_failure")
-	oldRow := []any{int64(1), "old", nil, true, numeric(t, "1.0000"), uuid.New(), time.Now(), int64(1)}
-	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{oldRow}, errorAt: -1}, 1); err != nil {
+	table := integrationTable(schemaName, "replace_existing")
+	oldRow := integrationRow(t, 1, "old")
+	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{oldRow}, errorAt: -1}, 1, syncmode.Replace); err != nil {
 		t.Fatal(err)
 	}
-	newRow := []any{int64(1), "new", nil, true, numeric(t, "2.0000"), uuid.New(), time.Now(), int64(2)}
-	_, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{newRow, newRow}, errorAt: 1}, 2)
+	newRow := integrationRow(t, 2, "new")
+	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{newRow}, errorAt: -1}, 1, syncmode.Replace); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var text string
+	if err := client.pool.QueryRow(ctx,
+		"SELECT COUNT(*), min(textvalue) FROM "+qualifiedName(schemaName, table.TargetName)).Scan(&count, &text); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || text != "new" {
+		t.Fatalf("replacement result count=%d text=%q", count, text)
+	}
+}
+
+func TestReplaceCopyFailureRollsBackAndPreservesTarget(t *testing.T) {
+	ctx, client, schemaName := integrationClient(t)
+	table := integrationTable(schemaName, "copy_failure")
+	oldRow := integrationRow(t, 1, "old")
+	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{oldRow}, errorAt: -1}, 1, syncmode.Replace); err != nil {
+		t.Fatal(err)
+	}
+	newRow := integrationRow(t, 2, "new")
+	_, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{newRow, newRow}, errorAt: 1}, 2, syncmode.Replace)
 	if err == nil {
 		t.Fatal("injected COPY failure unexpectedly succeeded")
 	}
@@ -166,6 +190,42 @@ func TestCopyFailureRollsBackAndPreservesTarget(t *testing.T) {
 	}
 }
 
+func TestReplaceCountMismatchRollsBackAndPreservesTarget(t *testing.T) {
+	ctx, client, schemaName := integrationClient(t)
+	table := integrationTable(schemaName, "count_mismatch")
+	oldRow := integrationRow(t, 1, "old")
+	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{oldRow}, errorAt: -1}, 1, syncmode.Replace); err != nil {
+		t.Fatal(err)
+	}
+	newRow := integrationRow(t, 2, "new")
+	_, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{newRow}, errorAt: -1}, 2, syncmode.Replace)
+	if err == nil || !strings.Contains(err.Error(), "COPY reported 1 rows") {
+		t.Fatalf("count mismatch error = %v", err)
+	}
+	assertTextValue(t, ctx, client, schemaName, table.TargetName, "old")
+}
+
+func TestReplaceForeignKeyRestrictionPreservesTarget(t *testing.T) {
+	ctx, client, schemaName := integrationClient(t)
+	table := integrationTable(schemaName, "fk_target")
+	oldRow := integrationRow(t, 1, "old")
+	if _, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{oldRow}, errorAt: -1}, 1, syncmode.Replace); err != nil {
+		t.Fatal(err)
+	}
+	reference := qualifiedName(schemaName, "fk_reference")
+	if _, err := client.pool.Exec(ctx, "CREATE TABLE "+reference+" (target_id integer REFERENCES "+qualifiedName(schemaName, table.TargetName)+"(id))"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.pool.Exec(ctx, "INSERT INTO "+reference+" (target_id) VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := client.Publish(ctx, table, &sliceSource{rows: [][]any{integrationRow(t, 2, "new")}, errorAt: -1}, 1, syncmode.Replace)
+	if err == nil || !strings.Contains(err.Error(), "foreign-key dependencies") || !strings.Contains(err.Error(), "--sync-mode=merge") {
+		t.Fatalf("foreign-key restriction error = %v", err)
+	}
+	assertTextValue(t, ctx, client, schemaName, table.TargetName, "old")
+}
+
 func TestInspectRejectsIncompatibleTarget(t *testing.T) {
 	ctx, client, schemaName := integrationClient(t)
 	table := integrationTable(schemaName, "incompatible")
@@ -174,5 +234,22 @@ func TestInspectRejectsIncompatibleTarget(t *testing.T) {
 	}
 	if _, err := client.Inspect(ctx, table); err == nil {
 		t.Fatal("Inspect accepted incompatible target schema")
+	}
+}
+
+func integrationRow(t *testing.T, id int64, text string) []any {
+	t.Helper()
+	return []any{id, text, nil, true, numeric(t, "1.0000"), uuid.New(), time.Now(), id}
+}
+
+func assertTextValue(t *testing.T, ctx context.Context, client *Client, schemaName, tableName, expected string) {
+	t.Helper()
+	var text string
+	if err := client.pool.QueryRow(ctx,
+		"SELECT textvalue FROM "+qualifiedName(schemaName, tableName)).Scan(&text); err != nil {
+		t.Fatal(err)
+	}
+	if text != expected {
+		t.Fatalf("live target changed: %q, want %q", text, expected)
 	}
 }

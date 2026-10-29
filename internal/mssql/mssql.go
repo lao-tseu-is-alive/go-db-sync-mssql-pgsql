@@ -18,7 +18,8 @@ var ErrTableNotFound = errors.New("SQL Server source table not found")
 
 // Client is a read-only SQL Server metadata and row client.
 type Client struct {
-	db *sql.DB
+	db                 *sql.DB
+	performanceMetrics bool
 }
 
 // Open connects to SQL Server using the supplied DSN and verifies connectivity.
@@ -43,6 +44,11 @@ func New(db *sql.DB) *Client {
 // Close releases the SQL Server connection pool.
 func (client *Client) Close() error {
 	return client.db.Close()
+}
+
+// EnablePerformanceMetrics enables opt-in per-row read, scan and conversion timings.
+func (client *Client) EnablePerformanceMetrics(enabled bool) {
+	client.performanceMetrics = enabled
 }
 
 const metadataQuery = `
@@ -133,7 +139,7 @@ func (client *Client) Rows(ctx context.Context, table schema.Table) (stream.Sour
 	if err != nil {
 		return nil, fmt.Errorf("query SQL Server source rows: %w", err)
 	}
-	return &RowSource{rows: rows, columns: table.Columns}, nil
+	return &RowSource{rows: rows, columns: table.Columns, measure: client.performanceMetrics}, nil
 }
 
 func selectColumn(column schema.Column) string {

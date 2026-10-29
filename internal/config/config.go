@@ -12,6 +12,7 @@ import (
 
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/ident"
 	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/naming"
+	"github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql/internal/syncmode"
 )
 
 const usageText = `Usage:
@@ -43,10 +44,16 @@ type Options struct {
 	Apply bool
 	// DryRun permits discovery and validation only.
 	DryRun bool
+	// SyncMode selects direct replacement or dependency-preserving reconciliation.
+	SyncMode syncmode.Mode
 	// Version requests version output without database configuration.
 	Version bool
-	// ProgressInterval controls staging progress output; zero disables it.
+	// ProgressInterval controls COPY progress output; zero disables it.
 	ProgressInterval time.Duration
+	// PerformanceMetrics enables detailed MSSQL row and COPY pipeline timings.
+	PerformanceMetrics bool
+	// CPUProfile is an optional new file path for a runtime/pprof CPU profile.
+	CPUProfile string
 	// MSSQLDSN is the secret-bearing source connection string and must not be logged.
 	MSSQLDSN string
 	// PGSQLDSN is the secret-bearing target connection string and must not be logged.
@@ -59,6 +66,7 @@ var ErrMissingDSN = errors.New("MSSQL_DSN and PGSQL_DSN are required")
 // Parse validates command-line arguments and reads DSNs through getenv.
 func Parse(arguments []string, getenv func(string) string, output io.Writer) (Options, error) {
 	var options Options
+	syncModeValue := string(syncmode.Replace)
 	flags := flag.NewFlagSet("go-db-sync-mssql-pgsql", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.Usage = func() {
@@ -71,8 +79,11 @@ func Parse(arguments []string, getenv func(string) string, output io.Writer) (Op
 	flags.StringVar(&options.TargetTable, "target-table", "", "PostgreSQL target table (default: legacy name transform)")
 	flags.BoolVar(&options.Apply, "apply", false, "authorize the transactional PostgreSQL refresh")
 	flags.BoolVar(&options.DryRun, "dry-run", false, "discover and validate without PostgreSQL writes")
+	flags.StringVar(&syncModeValue, "sync-mode", syncModeValue, "publication mode: replace or merge")
 	flags.BoolVar(&options.Version, "version", false, "print version and exit")
-	flags.DurationVar(&options.ProgressInterval, "progress-interval", 5*time.Second, "staging progress interval (0 disables progress)")
+	flags.DurationVar(&options.ProgressInterval, "progress-interval", 5*time.Second, "COPY progress interval (0 disables progress)")
+	flags.BoolVar(&options.PerformanceMetrics, "perf-metrics", false, "report detailed MSSQL and COPY pipeline timings")
+	flags.StringVar(&options.CPUProfile, "cpu-profile", "", "write an optional CPU profile to a new file")
 	if err := flags.Parse(arguments); err != nil {
 		return Options{}, err
 	}
@@ -91,6 +102,11 @@ func Parse(arguments []string, getenv func(string) string, output io.Writer) (Op
 	if options.ProgressInterval < 0 {
 		return Options{}, errors.New("--progress-interval cannot be negative")
 	}
+	mode, err := syncmode.Parse(syncModeValue)
+	if err != nil {
+		return Options{}, fmt.Errorf("--sync-mode: %w", err)
+	}
+	options.SyncMode = mode
 	if options.TargetTable == "" {
 		options.TargetTable = naming.TableName(options.SourceTable)
 	}
