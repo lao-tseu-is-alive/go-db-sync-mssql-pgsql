@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_NAME: go-db-sync-mssql-pgsql
+      MODULE: github.com/lao-tseu-is-alive/go-db-sync-mssql-pgsql
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve and verify release tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            release_version="${INPUT_TAG}"
+          else
+            release_version="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "${release_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid release tag: ${release_version}" >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/tags/${release_version}"; then
+            echo "release tag does not exist: ${release_version}" >&2
+            exit 1
+          fi
+          source_version="$(sed -n 's/^[[:space:]]*Version = "\([0-9][0-9.]*\)"/\1/p' pkg/version/version.go)"
+          if [[ "${release_version}" != "v${source_version}" ]]; then
+            echo "tag ${release_version} does not match source version v${source_version}" >&2
+            exit 1
+          fi
+          echo "RELEASE_VERSION=${release_version}" >>"${GITHUB_ENV}"
+          echo "release tag ${release_version} matches pkg/version/version.go"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Show Go version
+        run: go version
+
+      - name: Run repository release gate
+        run: make release-check
+
+      - name: Build Linux archives
+        run: |
+          set -euo pipefail
+          build_stamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          ldflags="-s -w -X ${MODULE}/pkg/version.Revision=${RELEASE_VERSION} -X ${MODULE}/pkg/version.BuildStamp=${build_stamp}"
+          for arch in amd64 arm64; do
+            binary="${APP_NAME}-linux-${arch}"
+            GOOS=linux GOARCH="${arch}" CGO_ENABLED=0 \
+              go build -trimpath -ldflags="${ldflags}" -o "${binary}" ./cmd/go-db-sync-mssql-pgsql
+            tar -czf "${binary}.tar.gz" "${binary}"
+          done
+          sha256sum "${APP_NAME}"-linux-*.tar.gz >SHA256SUMS
+
+      - name: Verify native release binary
+        run: |
+          set -euo pipefail
+          output="$(./${APP_NAME}-linux-amd64 --version)"
+          expected="${APP_NAME} ${RELEASE_VERSION} (revision ${RELEASE_VERSION}, built "
+          if [[ "${output}" != "${expected}"* ]]; then
+            echo "unexpected release version: ${output}" >&2
+            exit 1
+          fi
+
+      - name: Extract release notes
+        run: |
+          set -euo pipefail
+          version="${RELEASE_VERSION#v}"
+          awk -v heading="## [${version}]" '
+            $0 == heading || index($0, heading " - ") == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+            END { if (!found) exit 1 }
+          ' CHANGELOG.md >release-notes.md
+          test -s release-notes.md
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          name: ${{ env.RELEASE_VERSION }}
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            go-db-sync-mssql-pgsql-linux-amd64.tar.gz
+            go-db-sync-mssql-pgsql-linux-arm64.tar.gz
+            SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

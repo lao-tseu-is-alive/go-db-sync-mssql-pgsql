@@ -5,6 +5,13 @@ and this pre-1.0 project uses semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added a tag-triggered and manually dispatchable GitHub release workflow that
+  verifies source/tag version agreement, runs `make release-check`, publishes
+  static Linux amd64/arm64 archives and SHA-256 checksums, and derives release
+  notes from the matching changelog section.
+
 ## [0.2.0] - 2026-10-29
 
 ### Changed

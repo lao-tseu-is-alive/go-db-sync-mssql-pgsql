@@ -54,6 +54,10 @@ require_literal README.md '[documentation quality contract](docs/DOCUMENTATION.m
 require_literal Makefile 'docs-check: godoc-check atlas-check docs-assert' 'documentation gate composition'
 require_literal Makefile 'check: fmt-check lint test docs-check' 'normal gate composition'
 require_literal .github/workflows/ci.yml 'run: make release-check' 'CI repository gate'
+require_literal .github/workflows/release.yml 'contents: write' 'release contents permission'
+require_literal .github/workflows/release.yml 'run: make release-check' 'release repository gate'
+require_literal .github/workflows/release.yml 'sha256sum "${APP_NAME}"-linux-*.tar.gz >SHA256SUMS' 'release checksums'
+require_literal .github/workflows/release.yml 'tag ${release_version} does not match source version' 'release tag/version guard'
 
 if [[ "$failed" -ne 0 ]]; then
     exit 1

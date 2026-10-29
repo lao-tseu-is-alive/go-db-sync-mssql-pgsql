@@ -23,6 +23,8 @@
 - Unit tests and opt-in PostgreSQL integration scenarios for creation, exact
   values, incompatibility, empty source, existing-data replacement, COPY/count
   rollback and foreign-key restriction.
+- Tag-triggered and manually dispatchable GitHub release automation for static
+  Linux amd64/arm64 archives, checksums and changelog-derived release notes.
 
 `make check` passes on 2026-10-29. The race-enabled integration test package
 compiles, but its real-database cases skip because no separately supplied
@@ -32,6 +34,8 @@ both verified 2,361,511 source, copied and committed rows.
 
 ## Planned
 
+- Dispatch the release workflow for the existing `v0.2.0` tag after the
+  workflow lands on the default branch, then verify its published assets.
 - Execute the full multi-trial benchmark protocol, including an uninstrumented
   Python comparison, when a release performance claim is needed.
 - Add a rejected SQL Server type only after the selected table demonstrates a

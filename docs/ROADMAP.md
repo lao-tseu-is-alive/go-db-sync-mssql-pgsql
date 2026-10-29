@@ -21,6 +21,9 @@ IDs are stable and never reused.
   `TRUNCATE ... RESTRICT` plus direct COPY while retaining the original staged
   reconciliation as explicit `merge`, with rollback/FK tests and a same-snapshot
   `Document` comparison.
+- [x] **SYNC-008 — Release artifact workflow**: validate semantic-version tags,
+  run the repository release gate, cross-compile Linux amd64/arm64 archives,
+  publish checksums and create GitHub releases from matching changelog notes.
 
 ## Later work requiring a new instruction
 
@@ -39,6 +42,5 @@ infrastructure are outside Phase 1 and have no roadmap task.
 
 ## Next action
 
-After v0.2.0, run the opt-in PostgreSQL integration suite with a separately
-supplied `DBSYNC_TEST_PGSQL_DSN` before the next feature release; do not reuse
-an unconfirmed shared database for destructive tests.
+After the release workflow lands on the default branch, dispatch it manually
+for `v0.2.0` and verify both archives, `SHA256SUMS` and changelog-derived notes.

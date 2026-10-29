@@ -139,3 +139,15 @@ The [roadmap](docs/ROADMAP.md), [implementation status](docs/IMPLEMENTATION_STAT
 [changelog](CHANGELOG.md) are maintained with the code. `make docs-check`
 enforces GoDoc, the complete atlas and stable operational claims; `make check`
 is the normal handoff gate.
+
+## Releases
+
+Pushing a semantic-version tag such as `v0.3.0` runs the release workflow. It
+verifies that the tag matches `pkg/version/version.go`, runs
+`make release-check`, cross-compiles static Linux amd64 and arm64 binaries,
+packages them as `.tar.gz`, publishes `SHA256SUMS`, and creates the GitHub
+release from that version's changelog section.
+
+The workflow can also be started manually for an existing tag. This is useful
+for `v0.2.0`, whose tag predates the workflow. It never builds from an arbitrary
+branch: the requested tag must exist and match the source version at that tag.

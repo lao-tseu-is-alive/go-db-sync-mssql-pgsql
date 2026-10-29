@@ -119,6 +119,12 @@ CI runs the repository-owned `make release-check`, not a weaker parallel set
 of rules. Integration tests remain opt-in because they require explicitly
 authorized disposable databases.
 
+The tag-triggered release workflow and its manual existing-tag path MUST check
+that `vX.Y.Z` equals the source `Version`, run `make release-check`, build from
+that tag, and publish checksummed artifacts with release notes extracted from
+the matching dated changelog section. Release automation MUST use only the
+permissions needed to create GitHub release assets.
+
 ## Definition of done
 
 A change is complete when public contracts describe caller-relevant behavior,

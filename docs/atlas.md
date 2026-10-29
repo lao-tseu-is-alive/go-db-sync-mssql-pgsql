@@ -7,6 +7,7 @@ entry below. `make atlas-check` validates this list in both directions.
 
 - `.env.example` — Secret-free connection-variable template for operators.
 - `.github/workflows/ci.yml` — CI entry point that runs the repository-owned release gate.
+- `.github/workflows/release.yml` — Tag/manual workflow that validates, builds and publishes checksummed GitHub release assets.
 - `.gitignore` — Excludes credentials, binaries, coverage and local Go artifacts.
 - `AGENTS.md` — Authoritative task scope, compatibility and contributor instructions.
 - `CHANGELOG.md` — Versioned record of delivered behavior.

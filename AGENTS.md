@@ -15,6 +15,13 @@ guarded, one-table Phase 1 synchronization, optional `./.env` loading, periodic
 apply progress, detailed performance metrics, local CPU profiling and explicit
 `replace`/`merge` publication modes.
 
+Post-v0.2.0, the default branch also owns `.github/workflows/release.yml`. A
+semantic-version tag triggers the repository release gate, static Linux
+amd64/arm64 builds, SHA-256 checksums and a GitHub release whose notes come from
+the matching changelog section. Manual dispatch accepts only an existing tag
+that matches the source version; use it to publish assets for `v0.2.0`, whose
+tag predates the workflow.
+
 The authoritative current-state documents are:
 
 - [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) for completed
