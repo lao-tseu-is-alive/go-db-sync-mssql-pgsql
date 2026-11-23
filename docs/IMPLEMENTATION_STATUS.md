@@ -55,14 +55,27 @@ separately supplied `DBSYNC_TEST_PGSQL_DSN`. Operator-authorized Phase 1 replace
 and merge runs contacted disposable transit databases for the `Document`
 benchmark; both verified 2,361,511 source, copied and committed rows.
 
+On 2026-11-23, the first operator-authorized Phase 2 apply completed against
+the disposable transit database: 23 of 1,417 discovered tables were selected,
+1,394 were excluded, and all 23 succeeded with 2,052,690 verified rows. There
+were no failures, cancellations, naming collisions or invalid mappings; one
+missing target was created. Default replace mode with two workers and detailed
+metrics completed the apply phase in 16.869 seconds and the CLI run in 17.260
+seconds, reporting 118,930.5 rows/s and `downstream_ready=true`.
+
+An immediate equivalent repeat without detailed metrics also completed all 23
+tables and 2,052,690 rows. It took 15.226 seconds for apply and 15.924 seconds
+for the CLI, reporting 128,904.9 rows/s; `/usr/bin/time -v` measured 21.52
+seconds user CPU, 2.95 seconds system CPU and 26,332 KiB peak RSS.
+
 `make check` passes on 2026-10-29 with race detection, coverage, configuration,
 GoDoc, atlas, operational-claim and whitespace gates.
 
 ## Planned
 
-- Run the first operator-authorized all-table dry-run and disposable-transit
-  apply against the nightly snapshot; no production/shared target is used by
-  automated tests.
+- Repeat the uninstrumented all-table run across later nightly snapshots if a
+  capacity distribution or worker-count decision is needed; one trial is not a
+  performance distribution.
 - Execute the full multi-trial benchmark protocol, including an uninstrumented
   Python comparison, when a release performance claim is needed.
 - Add a rejected SQL Server type only after the selected table demonstrates a

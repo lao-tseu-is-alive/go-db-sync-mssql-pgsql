@@ -46,6 +46,11 @@ IDs are stable and never reused.
 - [x] **SYNC-014 — Exact decimal mapping and compact plans**: preserve SQL Server
   decimal/numeric precision and scale with exact value conversion and tests;
   suppress all-table exclusion detail unless explicitly requested.
+- [x] **SYNC-015 — First complete transit apply**: validate the exact exclusion
+  plan and complete an operator-authorized two-worker replace run for all 23
+  selected tables, verifying 2,052,690 committed rows with no failed or
+  cancelled tables; repeat without detailed metrics to capture wall time, CPU
+  and peak RSS.
 
 ## Later work requiring a new instruction
 
@@ -64,7 +69,7 @@ and deployment infrastructure remain outside the project scope.
 
 ## Next action
 
-Run the first complete operator-authorized `--all-tables --apply` against the
-disposable transit database, resolve any newly exposed unsupported source type
-through the same exact-value process, and record aggregate timings before
-considering further optimization.
+Review whether the 23-table selection and 1,394 exact exclusions remain the
+intended transit policy. If accepted, observe equivalent uninstrumented runs on
+later nightly snapshots before considering any worker-count or pipeline
+optimization; add new type mappings only when a selected table exposes them.

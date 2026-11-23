@@ -5,6 +5,14 @@ and this pre-1.0 project uses semantic versioning.
 
 ## [Unreleased]
 
+### Documentation
+
+- Recorded the first successful operator-authorized Phase 2 transit apply: all
+  23 selected tables and 2,052,690 rows completed with no failure or
+  cancellation, and the aggregate report marked downstream readiness true. An
+  immediate uninstrumented repeat established a 15.924-second CLI baseline with
+  21.52 seconds user CPU, 2.95 seconds system CPU and 26,332 KiB peak RSS.
+
 ## [0.3.0] - 2026-10-29
 
 ### Added

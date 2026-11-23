@@ -67,6 +67,64 @@ committed target counts matched in both modes. Exact typed values and rollback
 semantics are covered separately by deterministic and opt-in integration tests;
 no whole-table checksum was captured.
 
+## First complete multi-table transit run
+
+On 2026-11-23, the operator authorized the first complete Phase 2 run against
+the disposable PostgreSQL transit database. The v0.3.0 CLI used default
+`replace`, two fixed workers and `--perf-metrics`. The exact-name exclusion
+configuration selected 23 of 1,417 discovered MSSQL base tables and excluded
+1,394. A separate dry-run completed in 1.996 seconds with no collisions,
+invalid mappings or PostgreSQL writes.
+
+| Measurement | Result |
+| --- | ---: |
+| Selected / succeeded tables | 23 / 23 |
+| Failed / cancelled tables | 0 / 0 |
+| Source and committed rows | 2,052,690 |
+| Apply-command preflight | 0.390 s |
+| Apply phase | 16.869 s |
+| CLI duration | 17.260 s |
+| Aggregate throughput | 118,930.5 rows/s |
+| Newly created targets | 1 |
+| Downstream readiness | true |
+
+`dbo.ActeurRole` accounted for 1,549,721 rows (75.5% of the selected total)
+and dominated elapsed time. Its table duration was 13.543 seconds, including
+13.452 seconds in direct COPY. Instrumentation attributed 9.021 seconds to
+SQL Server row acquisition, scan and conversion, leaving 4.431 seconds for pgx
+encoding, client/server I/O and PostgreSQL COPY processing.
+
+Every table's expected source count matched the copied and committed count,
+including an empty table, and the new
+`public.aff_opc_dem_pc_dico_charge_unite` target was created successfully. This
+is count-level operational evidence, not a database-wide atomicity or
+whole-table equality claim. Detailed timers add per-row overhead, and this run
+did not capture process CPU or peak RSS, so it is not an uninstrumented capacity
+baseline and should not be compared directly with the single-table trials.
+
+Immediately afterward, the operator repeated the same 23-table replacement
+without `--perf-metrics`, against the same source snapshot and equivalently
+populated targets. `/usr/bin/time -v` captured the process measurements:
+
+| Measurement | Detailed metrics | Uninstrumented repeat |
+| --- | ---: | ---: |
+| Source and committed rows | 2,052,690 | 2,052,690 |
+| Apply phase | 16.869 s | 15.226 s |
+| CLI duration | 17.260 s | 15.924 s |
+| Wall time | Not separately captured | 15.93 s |
+| Aggregate throughput | 118,930.5 rows/s | 128,904.9 rows/s |
+| User CPU | Not captured | 21.52 s |
+| System CPU | Not captured | 2.95 s |
+| Peak RSS | Not captured | 26,332 KiB |
+| Successful / failed / cancelled | 23 / 0 / 0 | 23 / 0 / 0 |
+
+The uninstrumented CLI duration was 1.336 seconds (7.7%) lower and reported
+8.4% higher throughput than the detailed-metrics run. This consecutive pair
+shows the expected instrumentation cost in this workload, but one
+uninstrumented trial is still not a multi-run capacity distribution. The
+largest table, `dbo.ActeurRole`, completed in 11.454 seconds without detailed
+timers versus 13.543 seconds with them.
+
 ## Instrumentation model
 
 Coarse phase timings use only a few clock reads per synchronization and are

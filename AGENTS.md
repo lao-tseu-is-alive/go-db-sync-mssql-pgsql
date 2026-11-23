@@ -103,6 +103,17 @@ published 2,361,511 rows: replace took 81.12 seconds and merge 97.82 seconds.
 Treat the 17.1% observed reduction as single-trial evidence, not a general
 speedup claim.
 
+The first complete Phase 2 transit apply ran on 2026-11-23 with default replace,
+two workers and detailed metrics. All 23 selected tables succeeded, committing
+2,052,690 verified rows in a 16.869-second apply phase and 17.260-second CLI
+run; no table failed or was cancelled and downstream readiness was true. This
+instrumented single run is operational evidence rather than an uninstrumented
+capacity baseline; see `docs/PERFORMANCE.md` for attribution and caveats.
+An immediate equivalent repeat without detailed metrics completed in 15.924
+seconds at 128,904.9 rows/s; `/usr/bin/time -v` captured 21.52 seconds user CPU,
+2.95 seconds system CPU and 26,332 KiB peak RSS. Treat that as one baseline
+trial, not a performance distribution.
+
 ## Mandatory references — read before coding
 
 1. Legacy Python implementation, available locally at `/home/cgil/PycharmProjects/mssql2pgsql` (public: https://github.com/lao-tseu-is-alive/mssql2pgsql). Read **actual files**, especially:
