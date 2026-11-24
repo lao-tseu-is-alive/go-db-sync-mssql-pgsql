@@ -122,8 +122,9 @@ local `config/tables.yaml`, then replace its examples with names reported by
 `--list-tables`. Each `exclude` entry is matched exactly and case-sensitively
 against the original MSSQL table name before snake_case conversion. Duplicate
 and unknown exclusions fail validation, preventing a misspelled exclusion from
-silently selecting a table. Operator-specific and dated exclusion files under
-`config/` are intentionally not published.
+silently selecting a table. Operator-specific files such as
+`config/tables_poc.yaml` and dated exclusion files under `config/` are
+intentionally not published.
 
 The dry-run plan sorts original source names, lists selected and excluded
 tables, their destination names and row counts, and reports naming collisions.
@@ -135,6 +136,112 @@ To keep output readable, all-table plans print selected and invalid tables plus
 the aggregate exclusion count, but suppress individual excluded-table lines.
 `--show-excluded` restores the full exclusion detail for either dry-run or
 apply.
+
+### Full transit rehearsal
+
+[`scripts/recreate_and_verify_transit_replication.sh`](scripts/recreate_and_verify_transit_replication.sh)
+recreates only an explicitly confirmed transit database, then runs the
+complete certification sequence: dry-run, first apply into the empty database,
+and a second apply into the populated database. Both applies use replace mode,
+two workers by default and `/usr/bin/time -v`; detailed per-row metrics remain
+disabled so the logs provide usable CPU, RSS and wall-time baselines.
+
+The script is intentionally destructive. It does not impose a special test
+database name: the same transit database and `config/tables.yaml` intended for
+real operation can therefore be certified without configuration drift. It
+loads missing connection values
+from `./.env` when that file exists, without overriding exported values,
+expanding expressions or executing its contents. `--env-file` selects another
+dotenv file explicitly. Two DSNs are required: the read-only source and the
+PostgreSQL target. The script derives a maintenance connection from
+`PGSQL_DSN` by changing only the database name, so it uses the same server,
+role, credentials and TLS settings without another secret. DSNs are never
+printed. PostgreSQL system databases are always refused.
+
+The PostgreSQL role named by `--owner` and `PGSQL_DSN` must own the target and
+have the exact least-privilege attributes below. The script verifies them before
+displaying the destructive confirmation. When they differ, it stops and prints
+this statement for a suitably privileged operator to run; it never changes role
+attributes itself.
+
+```sql
+ALTER ROLE mon_user WITH
+    LOGIN
+    NOSUPERUSER
+    CREATEDB
+    NOCREATEROLE
+    NOREPLICATION
+    NOBYPASSRLS;
+```
+
+`CREATEDB` is the only database-creation capability needed by the rehearsal;
+`CREATEROLE` and superuser access are deliberately refused. The same role must
+own an existing target so it can be dropped. If other roles still own active
+sessions, forced disconnection can fail safely and the rehearsal stops before
+recreation.
+
+```sh
+# These values may instead be stored in the ignored ./.env file.
+export MSSQL_DSN='<read-only-mssql-dsn>'
+export PGSQL_DSN='<target-dsn-for-goeland>'
+
+scripts/recreate_and_verify_transit_replication.sh \
+  --database goeland \
+  --owner goeland_sync \
+  --tables-config config/tables.yaml \
+  --workers 2
+```
+
+Before mutation, the script verifies the real server/database/user identity,
+prints the complete destructive plan and asks the operator to type
+`RECREATE goeland`. For unattended operation only,
+`--confirm-recreate goeland` supplies the equivalent exact confirmation.
+
+Private logs are created in a new mode-0700 directory under `/tmp` unless a
+new `--log-dir` is supplied. On any failure the database must not be used
+downstream; running the script again recreates it before retrying. A successful
+run ends with `rehearsal_status=succeeded` and `downstream_ready=true`. Invoke
+the script without arguments, or with `--help`, to display its purpose,
+parameters, connection variables, safety rules and a complete example.
+
+### Daily production replication
+
+[`scripts/run_daily_transit_replication.sh`](scripts/run_daily_transit_replication.sh)
+runs the normal daily refresh without dropping or recreating PostgreSQL. It
+acquires a non-blocking process lock, performs exactly one complete all-table
+`replace` apply, records `/usr/bin/time -v` measurements in a private
+timestamped log and exits zero only when the aggregate reports no failed or
+cancelled table and `downstream_ready=true`.
+
+`--database` and `--owner` are mandatory. Before synchronization, the wrapper
+connects through `PGSQL_DSN` and proves the actual server, database, connected
+role and database owner; a mismatch fails before table writes. It safely loads
+missing DSNs from `./.env` without overriding exports. Unlike the destructive
+rehearsal, it does not need `CREATEDB`; the PostgreSQL role needs only the
+schema and table privileges used by normal synchronization, including creation
+of missing targets, `TRUNCATE` and `COPY`.
+
+The default console is compact: verified identity, aggregate plans, periodic
+progress for long copies, failures, final aggregate and key resource measures.
+The private timestamped log retains the complete output for every table. Logs
+are not removed automatically; production deployment must apply its normal
+retention policy to `--log-dir`.
+
+```sh
+scripts/run_daily_transit_replication.sh \
+  --database go_poc_replica \
+  --owner go_db_sync_goeland \
+  --tables-config config/tables_poc.yaml \
+  --workers 2 \
+  --progress-interval 30s \
+  --log-dir /tmp/log/go-db-sync-mssql-pgsql
+```
+
+Schedule this command only after the nightly MSSQL restore has completed. A
+nonzero exit means the refresh is incomplete: because table transactions are
+independent, previously committed tables remain committed. No downstream import
+may start. Invoke the script without arguments for its complete
+operational contract and options.
 
 During an apply, the CLI reports the current phase and COPY progress every five
 seconds: table, rows copied, percentage, elapsed time and rows/second. Replace reports

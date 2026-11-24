@@ -77,9 +77,23 @@ docs-assert:
 ## docs-check: run GoDoc, atlas and stable-claim checks
 docs-check: godoc-check atlas-check docs-assert
 
+.PHONY: script-check
+## script-check: validate repository-owned Bash scripts without database access
+script-check:
+	bash -n scripts/check_documentation_claims.sh \
+		scripts/lib/dotenv.sh \
+		scripts/recreate_and_verify_transit_replication.sh \
+		scripts/test_recreate_and_verify_transit_replication.sh \
+		scripts/run_daily_transit_replication.sh \
+		scripts/test_run_daily_transit_replication.sh
+	scripts/recreate_and_verify_transit_replication.sh --help >/dev/null
+	scripts/test_recreate_and_verify_transit_replication.sh
+	scripts/run_daily_transit_replication.sh --help >/dev/null
+	scripts/test_run_daily_transit_replication.sh
+
 .PHONY: check
 ## check: run formatting, lint, tests, config, documentation and whitespace gates
-check: fmt-check lint test config-check docs-check
+check: fmt-check lint test config-check docs-check script-check
 	git diff --check
 
 .PHONY: vuln-check

@@ -67,3 +67,8 @@ entry below. `make atlas-check` validates this list in both directions.
 - `internal/tableconfig/config_test.go` — YAML schema, exact-name and repository configuration tests.
 - `pkg/version/version.go` — Single audited version source and optional build metadata.
 - `scripts/check_documentation_claims.sh` — Deterministic cross-file security and operational assertions.
+- `scripts/lib/dotenv.sh` — Shared non-executing dotenv parser with exported-environment precedence for operator scripts.
+- `scripts/recreate_and_verify_transit_replication.sh` — Identity-checked destructive rehearsal for empty and populated transit databases.
+- `scripts/run_daily_transit_replication.sh` — Identity-checked, locked one-pass production replacement with compact console and complete private logs.
+- `scripts/test_recreate_and_verify_transit_replication.sh` — Offline safety, dotenv and precedence tests for the destructive rehearsal script.
+- `scripts/test_run_daily_transit_replication.sh` — Offline argument, locking and result-propagation tests for the daily production wrapper.

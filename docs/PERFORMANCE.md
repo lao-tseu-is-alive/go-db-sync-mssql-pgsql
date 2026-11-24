@@ -125,6 +125,42 @@ uninstrumented trial is still not a multi-run capacity distribution. The
 largest table, `dbo.ActeurRole`, completed in 11.454 seconds without detailed
 timers versus 13.543 seconds with them.
 
+## Expanded 60-table rehearsal
+
+On 2026-11-24, the operator ran the guarded full-transit rehearsal with an
+expanded private table policy. The restored source exposed 1,417 base tables;
+60 were selected and 1,357 excluded. The dry-run found no collision or invalid
+mapping and counted 19,894,444 selected rows. The rehearsal then applied the
+same snapshot once to the newly recreated empty database and once to the
+populated database.
+
+| Measurement | Empty target | Populated target |
+| --- | ---: | ---: |
+| Selected / succeeded tables | 60 / 60 | 60 / 60 |
+| Failed / cancelled tables | 0 / 0 | 0 / 0 |
+| Source and committed rows | 19,894,444 | 19,894,444 |
+| Apply phase | 151.664 s | 150.685 s |
+| CLI / wall duration | 152.990 s | 152.052 s |
+| Aggregate throughput | 130,037.8 rows/s | 130,839.7 rows/s |
+| User CPU | 426.78 s | 428.22 s |
+| System CPU | 65.86 s | 66.99 s |
+| Peak RSS | 21,724 KiB | 21,872 KiB |
+| Downstream readiness | true | true |
+
+The populated replacement was 0.938 seconds (0.6%) faster in wall time and its
+throughput was 0.6% higher. That difference is small enough to treat empty and
+populated replace performance as equivalent in this single consecutive pair.
+`dbo.Document` was the longest table at 103.445 and 102.551 seconds for
+2,370,906 rows; narrow relationship tables frequently exceeded 180,000 rows/s,
+showing that row width and conversion/encoding work matter more than row count
+alone.
+
+Both passes matched expected, copied and committed counts for every table,
+including an empty table. This remains count-level operational evidence rather
+than whole-table equality proof. The tested binary identified itself as a
+dirty build, so preserve these measurements as capacity evidence but repeat
+with a clean release binary before making a release-specific performance claim.
+
 ## Instrumentation model
 
 Coarse phase timings use only a few clock reads per synchronization and are

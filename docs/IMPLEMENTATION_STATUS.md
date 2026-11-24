@@ -47,6 +47,20 @@ Release baseline: **v0.3.0** (2026-10-29).
 - Fail-fast multi-table cancellation: the first table failure cancels in-flight
   transactions and leaves queued jobs unstarted. Every selected table receives
   a deterministic terminal summary and incomplete runs exit nonzero.
+- A guarded full-transit rehearsal script that recreates only an explicitly
+  confirmed database after verifying its real PostgreSQL server/database/user
+  identity, validates the full plan, measures first-load and populated-target
+  replacement runs, and exposes downstream readiness only after both aggregates
+  succeed. It safely loads missing connections from an optional dotenv file
+  while preserving exported values, derives maintenance access from the target
+  DSN, and verifies rather than grants the owner's exact least-privilege role
+  attributes.
+- A daily production wrapper that never recreates PostgreSQL, prevents
+  overlapping executions with a non-blocking lock, pins one all-table replace
+  apply, verifies mandatory target database/user/owner identity, stores the
+  complete output in a private timestamped resource-usage log, presents a
+  compact console and accepts success only when the final aggregate declares
+  complete downstream readiness.
 
 Phase 2 unit tests cover planning, exact exclusions, naming collisions, worker
 bounds, cancellation and failure propagation. The race-enabled integration
@@ -68,14 +82,20 @@ tables and 2,052,690 rows. It took 15.226 seconds for apply and 15.924 seconds
 for the CLI, reporting 128,904.9 rows/s; `/usr/bin/time -v` measured 21.52
 seconds user CPU, 2.95 seconds system CPU and 26,332 KiB peak RSS.
 
+On 2026-11-24, the guarded rehearsal selected and completed 60 of 1,417 tables
+twice, verifying 19,894,444 rows in both the empty-target and populated-target
+runs. CLI durations were 152.990 and 152.052 seconds respectively, with
+130,037.8 and 130,839.7 rows/s, about 21.3 MiB peak RSS and no failed or
+cancelled table. The binary reported a dirty revision, so this is strong
+operational evidence but not release-reproducible benchmark evidence.
+
 `make check` passes on 2026-10-29 with race detection, coverage, configuration,
 GoDoc, atlas, operational-claim and whitespace gates.
 
 ## Planned
 
-- Repeat the uninstrumented all-table run across later nightly snapshots if a
-  capacity distribution or worker-count decision is needed; one trial is not a
-  performance distribution.
+- Build a clean release binary and exercise the daily wrapper once under the
+  intended scheduler account before enabling the external nightly schedule.
 - Execute the full multi-trial benchmark protocol, including an uninstrumented
   Python comparison, when a release performance claim is needed.
 - Add a rejected SQL Server type only after the selected table demonstrates a

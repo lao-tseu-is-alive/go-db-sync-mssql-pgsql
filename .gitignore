@@ -36,6 +36,7 @@ go.work.sum
 # Operator-specific table selections and dated working lists.
 # Keep only config/config_Sample.yaml under version control.
 config/tables.yaml
+config/tables_*.yaml
 config/exclude_tables_*.txt
 config/exclude_tables_*.yaml
 
@@ -45,3 +46,6 @@ config/exclude_tables_*.yaml
 
 # Unrelated local helper copied from the Goéland reference repository.
 scripts/createLocalDBAndUser.sh
+
+# Local shell/session history; may contain sensitive operator commands.
+/history.txt

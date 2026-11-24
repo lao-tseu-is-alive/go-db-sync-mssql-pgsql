@@ -61,8 +61,9 @@ the atlas in the same change. Generated artifacts, examples and authoritative
 inputs are distinguished in descriptions.
 
 `config/config_Sample.yaml` is the only tracked table-selection example.
-Operator-specific `config/tables.yaml` and dated exclusion working files MUST
-remain ignored and MUST NOT be treated as release inputs.
+Operator-specific `config/tables.yaml`, `config/tables_*.yaml` and dated
+exclusion working files MUST remain ignored and MUST NOT be treated as release
+inputs.
 
 ## Executable claims
 
@@ -86,6 +87,31 @@ source/target mappings before the first write, each table has an independent
 transaction, and a run is not database-wide atomic. It MUST describe the
 fail-fast cancellation policy and prohibit downstream imports unless the final
 aggregate reports complete success.
+
+The repository-owned full transit rehearsal MUST verify the maintenance and
+target server/database/user identities, display its exact destructive action
+plan and require the operator to type `RECREATE <database>` unless an exact
+non-interactive confirmation is supplied. It MUST reject PostgreSQL system
+databases, keep DSNs out of output, load optional dotenv values without
+overriding the exported environment or executing file content, derive its
+maintenance connection from the target DSN rather than require another secret,
+and verify the owner's exact least-privilege role attributes without changing
+them. It MUST refuse downstream readiness unless both the empty-database and
+populated-database applies report complete aggregate success. Its syntax, help
+and isolated guard tests are part of `make script-check`; no database connection
+occurs in the normal quality gate.
+
+The repository-owned daily production wrapper MUST NOT drop or recreate the
+target database. It MUST pin all-table replace apply, reject overlapping runs
+with a non-blocking lock, require and verify exact target database/user/owner
+identity before writes, keep logs private, preserve complete output in the log
+while presenting a compact console, preserve the CLI exit failure and
+independently require the complete aggregate to report zero failed/cancelled
+tables and downstream readiness. Its documentation MUST distinguish the normal
+schema/table privileges from the rehearsal-only CREATEDB requirement and state
+that downstream work cannot begin after a nonzero exit. Offline identity,
+output, success, failure, argument and lock tests are part of `make
+script-check`.
 
 All-table plan documentation SHOULD distinguish selected/invalid detail from
 the aggregate exclusion count. Full exclusion detail is available explicitly
@@ -124,6 +150,7 @@ make check
   ├─ make test
   ├─ make config-check
   ├─ make docs-check
+  ├─ make script-check
   └─ git diff --check
 
 make release-check

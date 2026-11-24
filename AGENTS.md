@@ -59,8 +59,8 @@ Multi-table behavior is deliberately narrow:
   `--tables-config` contains exact, case-sensitive original MSSQL names to
   exclude before target-name conversion;
 - `config/config_Sample.yaml` is the tracked public template;
-  `config/tables.yaml` and dated exclusion working files are local operator
-  state and must remain ignored;
+  `config/tables.yaml`, `config/tables_*.yaml` and dated exclusion working files
+  are local operator state and must remain ignored;
 - the complete plan is sorted and validated before any write, and selected
   sources that map to one target make the plan fail closed;
 - all-table plans suppress individual excluded-table lines by default while
@@ -113,6 +113,34 @@ An immediate equivalent repeat without detailed metrics completed in 15.924
 seconds at 128,904.9 rows/s; `/usr/bin/time -v` captured 21.52 seconds user CPU,
 2.95 seconds system CPU and 26,332 KiB peak RSS. Treat that as one baseline
 trial, not a performance distribution.
+
+For broader operator certification, use
+`scripts/recreate_and_verify_transit_replication.sh`. It accepts source and
+target DSNs from the environment or safely loads missing values from optional
+dotenv data without overriding exports. The PostgreSQL maintenance connection
+is derived from `PGSQL_DSN`, changing only its database name, and uses the same
+role. Before exact destructive confirmation, the script requires that role to
+own the target and have LOGIN, NOSUPERUSER, CREATEDB, NOCREATEROLE,
+NOREPLICATION and NOBYPASSRLS; it prints but never executes corrective SQL.
+It then performs a dry-run, an empty-database apply and a populated-database
+apply. Interactive confirmation requires `RECREATE <database>`; exact
+`--confirm-recreate` is for unattended use. It reports downstream readiness
+only after both aggregates succeed; the normal quality gate exercises its
+syntax, help and isolated guards and never connects to a database.
+
+For normal unattended refreshes, use
+`scripts/run_daily_transit_replication.sh`. It never drops or recreates the
+database, acquires a non-blocking exclusive lock, pins replace mode, performs
+one all-table apply and accepts success only from the complete aggregate with
+zero failed/cancelled tables and downstream readiness true. It writes a private
+timestamped `/usr/bin/time -v` log while presenting compact console output.
+Mandatory `--database` and `--owner` values are verified against the actual
+PGSQL_DSN server connection, current database/user and database owner before
+writes. Missing DSNs use the same safe shared dotenv parser as the rehearsal.
+The daily path does not require CREATEDB; that attribute belongs only to the
+destructive rehearsal. Its offline tests cover identity mismatch, full-log
+preservation, compact output, argument construction, success/failure
+propagation and overlapping-run refusal.
 
 ## Mandatory references — read before coding
 

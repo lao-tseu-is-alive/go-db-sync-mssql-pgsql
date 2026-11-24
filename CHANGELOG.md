@@ -5,6 +5,28 @@ and this pre-1.0 project uses semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Added a guarded full-transit rehearsal script that verifies the real target
+  and maintenance server/database/user identities, displays every destructive
+  action and requires `RECREATE <database>` interactively or an exact
+  non-interactive confirmation. It recreates the target, validates the complete
+  plan, then measures both first-load and populated-target replace runs before
+  reporting downstream readiness. Missing connection values may be loaded from
+  `.env` without overriding exports or executing content; no-argument
+  invocation displays purpose, workflow, parameters, role requirements, safety
+  rules and examples. PostgreSQL maintenance access is derived from the target
+  DSN, eliminating a separate admin secret; the script verifies CREATEDB and
+  the other least-privilege role attributes and prints corrective SQL when they
+  differ.
+- Added a separate daily production wrapper that never recreates the database,
+  prevents overlapping runs, verifies mandatory target database/user/owner
+  identity, pins one all-table replace apply, writes complete private
+  timestamped resource-usage logs behind a compact console and permits
+  downstream processing only after complete aggregate success. Its offline
+  tests cover identity mismatch, output filtering, exact CLI arguments, lock
+  refusal and failure propagation.
+
 ### Documentation
 
 - Recorded the first successful operator-authorized Phase 2 transit apply: all
@@ -27,9 +49,9 @@ and this pre-1.0 project uses semantic versioning.
 - Added source-only `--list-tables`, which requires no PostgreSQL DSN or
   connection and prints deterministically sorted exact MSSQL base-table names
   for exclusion-file preparation.
-- Added a commented `config/config_Sample.yaml`; real `config/tables.yaml` and
-  dated exclusion working files are ignored as environment-specific operator
-  configuration.
+- Added a commented `config/config_Sample.yaml`; real `config/tables.yaml`,
+  `config/tables_*.yaml` and dated exclusion working files are ignored as
+  environment-specific operator configuration.
 - Added a fixed `--workers` pool (default two) with independent connection pairs,
   per-table transactions, per-table summaries and a final aggregate report.
 - Added exact SQL Server `decimal(p,s)` and `numeric(p,s)` support. PostgreSQL

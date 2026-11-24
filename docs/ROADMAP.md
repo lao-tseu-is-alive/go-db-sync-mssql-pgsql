@@ -51,6 +51,15 @@ IDs are stable and never reused.
   selected tables, verifying 2,052,690 committed rows with no failed or
   cancelled tables; repeat without detailed metrics to capture wall time, CPU
   and peak RSS.
+- [x] **SYNC-016 — Reproducible full-transit rehearsal**: add a guarded script
+  that recreates an explicitly confirmed transit database after verifying its
+  real server/database/user identity, dry-runs the
+  complete plan, measures empty and populated replace runs, and refuses
+  downstream readiness after any incomplete aggregate.
+- [x] **SYNC-017 — Guarded daily production wrapper**: run one locked all-table
+  replace apply without database recreation, verify the exact target identity,
+  retain complete private resource-usage logs behind a compact console and
+  expose success only after complete aggregate downstream readiness.
 
 ## Later work requiring a new instruction
 
@@ -69,7 +78,7 @@ and deployment infrastructure remain outside the project scope.
 
 ## Next action
 
-Review whether the 23-table selection and 1,394 exact exclusions remain the
-intended transit policy. If accepted, observe equivalent uninstrumented runs on
-later nightly snapshots before considering any worker-count or pipeline
-optimization; add new type mappings only when a selected table exposes them.
+Commit and build a clean release candidate, then execute the daily wrapper once
+under the intended scheduler account with the production table policy. Enable
+the external nightly schedule only after that run reports complete aggregate
+success; keep scheduler implementation outside this repository.
