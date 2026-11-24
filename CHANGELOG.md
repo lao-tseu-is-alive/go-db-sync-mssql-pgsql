@@ -34,6 +34,10 @@ and this pre-1.0 project uses semantic versioning.
   cancellation, and the aggregate report marked downstream readiness true. An
   immediate uninstrumented repeat established a 15.924-second CLI baseline with
   21.52 seconds user CPU, 2.95 seconds system CPU and 26,332 KiB peak RSS.
+- Recorded the expanded 60-table rehearsal and first daily-wrapper run. The
+  daily wrapper verified 19,894,444 rows in 144.827 seconds at 137,367.4 rows/s
+  with no failure or cancellation; raw operational logs remain private in the
+  ignored local `log/` directory.
 
 ## [0.3.0] - 2026-10-29
 

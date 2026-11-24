@@ -161,6 +161,37 @@ than whole-table equality proof. The tested binary identified itself as a
 dirty build, so preserve these measurements as capacity evidence but repeat
 with a clean release binary before making a release-specific performance claim.
 
+## First daily-wrapper run
+
+Later on 2026-11-24, the operator changed `PGSQL_DSN` intentionally to the
+older initial `go_db_sync_goeland` test database and ran the daily wrapper with
+the same 60-table policy, two workers and a 30-second progress interval. The
+target therefore contained only the earlier subset of tables; the preflight
+reported the remaining targets absent and the normal engine created them.
+
+| Measurement | Result |
+| --- | ---: |
+| Selected / succeeded tables | 60 / 60 |
+| Failed / cancelled tables | 0 / 0 |
+| Source and committed rows | 19,894,444 |
+| Apply phase | 143.493 s |
+| CLI duration | 144.827 s |
+| Wrapper wall time | 144.860 s |
+| Aggregate throughput | 137,367.4 rows/s |
+| User CPU | 373.16 s |
+| System CPU | 53.19 s |
+| Average process CPU | 294% |
+| Peak RSS | 22,916 KiB |
+| Downstream readiness | true |
+
+The wrapper added only about 0.033 seconds around the CLI. This run was 7.225
+seconds (4.8%) faster than the immediately preceding populated-target rehearsal
+pass, but the target state differed and this remains a single trial rather than
+a controlled performance comparison. It also used the same dirty binary and
+preceded the later mandatory `--database`/`--owner` identity guard and compact
+console. The complete private log is retained locally under the ignored `log/`
+directory and is not release evidence.
+
 ## Instrumentation model
 
 Coarse phase timings use only a few clock reads per synchronization and are

@@ -78,7 +78,8 @@ and deployment infrastructure remain outside the project scope.
 
 ## Next action
 
-Commit and build a clean release candidate, then execute the daily wrapper once
-under the intended scheduler account with the production table policy. Enable
-the external nightly schedule only after that run reports complete aggregate
-success; keep scheduler implementation outside this repository.
+Build a clean release candidate, then execute the final identity-checked daily
+wrapper once under the intended scheduler account with the production table
+policy. Enable the external nightly schedule only after that run reports
+complete aggregate success; keep scheduler implementation outside this
+repository.

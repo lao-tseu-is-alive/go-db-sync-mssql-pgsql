@@ -9,6 +9,9 @@
 *.dylib
 bin/
 
+# Private local operational logs and retained run evidence.
+/log/
+
 # Test binary, built with `go test -c`
 *.test
 

@@ -142,6 +142,15 @@ destructive rehearsal. Its offline tests cover identity mismatch, full-log
 preservation, compact output, argument construction, success/failure
 propagation and overlapping-run refusal.
 
+The first operator daily-wrapper run on 2026-11-24 intentionally targeted the
+older `go_db_sync_goeland` test database after `PGSQL_DSN` was changed. All 60
+selected tables and 19,894,444 rows completed in 144.827 seconds at 137,367.4
+rows/s, with zero failures/cancellations and downstream readiness true. This
+preceded the mandatory `--database`/`--owner` identity guard and used a dirty
+binary, so it is operational evidence rather than release certification. Its
+complete private log was moved from `/tmp/log` into the ignored repository-local
+`log/` directory; never add that directory to version control.
+
 ## Mandatory references — read before coding
 
 1. Legacy Python implementation, available locally at `/home/cgil/PycharmProjects/mssql2pgsql` (public: https://github.com/lao-tseu-is-alive/mssql2pgsql). Read **actual files**, especially:

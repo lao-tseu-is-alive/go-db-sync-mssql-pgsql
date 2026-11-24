@@ -94,7 +94,7 @@ Example:
     --tables-config config/tables_poc.yaml \
     --workers 2 \
     --progress-interval 30s \
-    --log-dir /tmp/log/go-db-sync-mssql-pgsql
+    --log-dir log/go-db-sync-mssql-pgsql
 
 Schedule this command only after the nightly source restore is complete. The
 scheduler must treat a nonzero exit as a failed refresh and must start any

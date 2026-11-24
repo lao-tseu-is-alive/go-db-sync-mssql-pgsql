@@ -225,7 +225,8 @@ The default console is compact: verified identity, aggregate plans, periodic
 progress for long copies, failures, final aggregate and key resource measures.
 The private timestamped log retains the complete output for every table. Logs
 are not removed automatically; production deployment must apply its normal
-retention policy to `--log-dir`.
+retention policy to `--log-dir`. Repository-local operational evidence belongs
+under the ignored `log/` directory and must never be committed.
 
 ```sh
 scripts/run_daily_transit_replication.sh \
@@ -234,7 +235,7 @@ scripts/run_daily_transit_replication.sh \
   --tables-config config/tables_poc.yaml \
   --workers 2 \
   --progress-interval 30s \
-  --log-dir /tmp/log/go-db-sync-mssql-pgsql
+  --log-dir log/go-db-sync-mssql-pgsql
 ```
 
 Schedule this command only after the nightly MSSQL restore has completed. A

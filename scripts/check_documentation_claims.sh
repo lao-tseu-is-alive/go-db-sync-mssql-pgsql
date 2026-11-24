@@ -49,7 +49,9 @@ require_literal scripts/run_daily_transit_replication.sh 'database ${database} i
 require_literal scripts/run_daily_transit_replication.sh '| compact_console' 'daily compact-console filter'
 require_literal README.md 'private timestamped log retains the complete output' 'documented complete daily log'
 require_literal README.md '--tables-config config/tables_poc.yaml' 'documented daily operator example config'
-require_literal README.md '--log-dir /tmp/log/go-db-sync-mssql-pgsql' 'documented daily operator example log path'
+require_literal README.md '--log-dir log/go-db-sync-mssql-pgsql' 'documented daily operator example log path'
+require_literal README.md 'ignored `log/` directory' 'documented private local log boundary'
+require_literal .gitignore '/log/' 'private local logs ignored'
 require_literal README.md 'does not need' 'documented daily CREATEDB boundary'
 require_literal README.md 'No downstream import' 'documented daily failure boundary'
 

@@ -113,6 +113,11 @@ that downstream work cannot begin after a nonzero exit. Offline identity,
 output, success, failure, argument and lock tests are part of `make
 script-check`.
 
+Private retained operator logs MAY live under the repository-local `log/`
+directory, which MUST remain ignored and absent from the atlas. Documentation
+may record aggregate, non-sensitive measurements, but raw logs MUST NOT be
+committed or published.
+
 All-table plan documentation SHOULD distinguish selected/invalid detail from
 the aggregate exclusion count. Full exclusion detail is available explicitly
 through `--show-excluded`.

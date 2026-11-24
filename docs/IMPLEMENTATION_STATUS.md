@@ -89,7 +89,13 @@ runs. CLI durations were 152.990 and 152.052 seconds respectively, with
 cancelled table. The binary reported a dirty revision, so this is strong
 operational evidence but not release-reproducible benchmark evidence.
 
-`make check` passes on 2026-10-29 with race detection, coverage, configuration,
+The first daily-wrapper run then targeted the intentionally restored older test
+database and completed the same 60 tables and 19,894,444 rows in 144.827
+seconds at 137,367.4 rows/s, with zero failures/cancellations and downstream
+readiness true. This occurred before the final target-identity and compact
+console guards and used the dirty binary, so a clean guarded run remains due.
+
+`make check` passes on 2026-11-24 with race detection, coverage, configuration,
 GoDoc, atlas, operational-claim and whitespace gates.
 
 ## Planned
